@@ -1,0 +1,137 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: WP Change Default From Email v1.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: \n"
+"PO-Revision-Date: 2015-03-22 10:31:03+0000\n"
+"Last-Translator: admin <subodhghulaxe@gmail.com>\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=n%100/10==1 ? 2 : n%10==1 ? 0 : (n+9)%10>3 ? 2 : 1;\n"
+"X-Generator: CSL v1.x\n"
+"X-Poedit-Language: Russian\n"
+"X-Poedit-Country: RUSSIA\n"
+"X-Poedit-SourceCharset: utf-8\n"
+"X-Poedit-KeywordsList: __;_e;__ngettext:1,2;_n:1,2;__ngettext_noop:1,2;_n_noop:1,2;_c,_nc:4c,1,2;_x:1,2c;_ex:1,2c;_nx:4c,1,2;_nx_noop:4c,1,2;\n"
+"X-Poedit-Basepath: ../\n"
+"X-Poedit-Bookmarks: \n"
+"X-Poedit-SearchPath-0: .\n"
+"X-Textdomain-Support: yes"
+
+#. translators: plugin header field 'Name'
+#: WCDFE.php:0
+#@ WCDFE_translation
+msgid "WP Change Default From Email"
+msgstr ""
+
+#. translators: plugin header field 'Description'
+#: WCDFE.php:0
+#@ WCDFE_translation
+msgid "A simple and easy way to change the from email address and from email name that appear on emails sent from WordPress."
+msgstr "Простой и легкий способ изменитьпри помощи электронной почты и от имени электронной почты , которые появляются на письма, отправленные из WordPress."
+
+#. translators: plugin header field 'Author'
+#: WCDFE.php:0
+#@ WCDFE_translation
+msgid "Subodh Ghulaxe"
+msgstr ""
+
+#. translators: plugin header field 'Version'
+#: WCDFE.php:0
+#@ WCDFE_translation
+msgid "1.1.0"
+msgstr ""
+
+#: WCDFE.php:147
+#: admin/pages/settings.php:7
+#@ WCDFE_translation
+msgid "Settings"
+msgstr "settings"
+
+#: WCDFE.php:166
+#@ WCDFE_translation
+msgid "Donate"
+msgstr "дарить"
+
+#: admin/WCDFE_Admin.php:63
+#@ WCDFE_translation
+msgid "Change From Email"
+msgstr "Изменить С адреса электронной почты"
+
+#: admin/WCDFE_Admin.php:86
+#@ WCDFE_translation
+msgid "<b>From Name</b> must not be empty."
+msgstr "<b>Из Имя</b> не должен быть пустым."
+
+#: admin/WCDFE_Admin.php:91
+#@ WCDFE_translation
+msgid "<b>From Email</b> must be a valid email address."
+msgstr "<b> С адреса электронной почты </b> должны бытьдействительный адрес электронной почты."
+
+#: admin/WCDFE_Admin.php:99
+#@ WCDFE_translation
+msgid "Settings updated successfully."
+msgstr "Настройки успешно обновлены ."
+
+#: admin/WCDFE_Admin.php:102
+#@ WCDFE_translation
+msgid "No settings were updated."
+msgstr "Настройки не были обновлены ."
+
+#: admin/pages/settings.php:8
+#@ WCDFE_translation
+msgid "Help"
+msgstr "помогите"
+
+#: admin/pages/settings.php:19
+#@ WCDFE_translation
+msgid "Enable/Disable"
+msgstr "Включить / Выключить"
+
+#: admin/pages/settings.php:32
+#@ WCDFE_translation
+msgid "From Name"
+msgstr "От имя"
+
+#: admin/pages/settings.php:39
+#@ WCDFE_translation
+msgid "From Email"
+msgstr "От Email"
+
+#: admin/pages/settings.php:42
+#@ WCDFE_translation
+msgid "To avoid your email being marked as spam, it is highly recommended that your \"from\" domain match your website."
+msgstr "Чтобы избежать Ваш адрес электронной помечается как спам, то настоятельно рекомендуется, чтобы \\\"из\\\" области совпадают вашего сайта."
+
+#: admin/pages/settings.php:61
+#@ WCDFE_translation
+msgid "If mails are going in spam."
+msgstr "Если почта идет в спам."
+
+#: admin/pages/settings.php:62
+#@ WCDFE_translation
+msgid "To avoid your email being marked as spam, it is highly recommended that your domain name in 'From Email' must match with your website, i.e. if your website is <code>www.example.com</code> then your email must hosted on <code>@example.com</code>."
+msgstr "Чтобы избежать вашу электронную почту помечается как спам, то настоятельно рекомендуется, чтобы доменное имя в ваш « От электронная почта' должен соответствовать ваш сайт , то есть , если ваш сайт <code> www.example.com </code> , то ваш адрес электронной почты обязательным состоялся на <code> @ example.com </code>."
+
+#: admin/pages/settings.php:65
+#@ WCDFE_translation
+msgid "Do you offer support?"
+msgstr "Вы предлагаете поддержку?"
+
+#: admin/pages/settings.php:66
+#@ WCDFE_translation
+msgid "You can contact me at my email address"
+msgstr "Вы можете связаться со мной по моей электронной почты"
+
+#: admin/pages/settings.php:118
+#@ WCDFE_translation
+msgid "No settings were saved."
+msgstr "Настройки не были сохранены."
+
+#: admin/pages/settings.php:52
+#@ WCDFE_translation
+msgid "Save Settings"
+msgstr "Сохранить настройки"
+

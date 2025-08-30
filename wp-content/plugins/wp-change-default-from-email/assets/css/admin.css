@@ -1,0 +1,95 @@
+.wcdfe-row{
+	clear: both;
+	display: block;
+}
+.wcdfe-col-12{
+	float: left;
+    position: relative;
+    width: 98%;
+    padding: 15px 10px 15px 0;
+    border-bottom: 1px solid #ddd;
+}
+.wcdfe-addon-label{
+	font-weight: 600;
+	width: 25%;
+	display: inline-block;
+	color: #111;
+	vertical-align: top;
+	margin-top: 7px;
+}
+.wcdfe-addon-switch{
+	display: inline-block;
+	position: relative;
+}
+
+/** On Off Switch Style */
+.wcdfe-onoffswitch {
+    position: relative; width: 90px;
+    -webkit-user-select:none; -moz-user-select:none; -ms-user-select: none;
+}
+.wcdfe-onoffswitch-checkbox {
+    display: none !important;
+}
+.wcdfe-onoffswitch-label {
+    display: block; overflow: hidden; cursor: pointer;
+    border: 2px solid #999999; border-radius: 20px;
+}
+.wcdfe-onoffswitch-inner {
+    display: block; width: 200%; margin-left: -100%;
+    -moz-transition: margin 0.3s ease-in 0s; -webkit-transition: margin 0.3s ease-in 0s;
+    -o-transition: margin 0.3s ease-in 0s; transition: margin 0.3s ease-in 0s;
+}
+.wcdfe-onoffswitch-inner:before, .wcdfe-onoffswitch-inner:after {
+    display: block; float: left; width: 50%; height: 30px; padding: 0; line-height: 30px;
+    font-size: 14px; color: white; font-family: Trebuchet, Arial, sans-serif; font-weight: bold;
+    -moz-box-sizing: border-box; -webkit-box-sizing: border-box; box-sizing: border-box;
+}
+.wcdfe-onoffswitch-inner:before {
+    content: "Enable";
+    padding-left: 10px;
+    background-color: #3F9CC7; color: #FFFFFF;
+}
+.wcdfe-onoffswitch-inner:after {
+    content: "Disable";
+    padding-right: 7px;
+    background-color: #EEEEEE; color: #999999;
+    text-align: right;
+}
+.wcdfe-onoffswitch-switch {
+    display: block; width: 18px; margin: 6px;
+    background: #FFFFFF;
+    border: 2px solid #999999; border-radius: 20px;
+    position: absolute; top: 0; bottom: 0; right: 56px;
+    -moz-transition: all 0.3s ease-in 0s; -webkit-transition: all 0.3s ease-in 0s;
+    -o-transition: all 0.3s ease-in 0s; transition: all 0.3s ease-in 0s; 
+}
+.wcdfe-onoffswitch-checkbox:checked + .wcdfe-onoffswitch-label .wcdfe-onoffswitch-inner {
+    margin-left: 0;
+}
+.wcdfe-onoffswitch-checkbox:checked + .wcdfe-onoffswitch-label .wcdfe-onoffswitch-switch {
+    right: 0px; 
+}
+.wcdfe-save-settings-container{
+	clear: both;
+	padding-top: 20px;
+}
+.wcdfe-save-settings-container .button-large{
+	height: 40px !important;
+	font-size: 16px;
+}
+#wcdfe-error-message{
+	position: relative;
+	display: inline-block;
+}
+#wcdfe-error-message .updated, #wcdfe-error-message .error {
+	display: block !important;
+	margin-top: 0px !important;
+}
+#wcdfe-settings input[type=text]{
+    width: 300px;
+    height: 30px;
+}
+#wcdfe-settings small{
+    display: block;
+    font-size: 10px;
+}

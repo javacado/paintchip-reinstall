@@ -1,0 +1,137 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: WP Change Default From Email v1.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: \n"
+"PO-Revision-Date: 2015-03-22 10:23:50+0000\n"
+"Last-Translator: admin <subodhghulaxe@gmail.com>\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=6; plural=n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 ? 4 : 5;\n"
+"X-Generator: CSL v1.x\n"
+"X-Poedit-Language: Arabic\n"
+"X-Poedit-Country: SAUDI ARABIA\n"
+"X-Poedit-SourceCharset: utf-8\n"
+"X-Poedit-KeywordsList: __;_e;__ngettext:1,2;_n:1,2;__ngettext_noop:1,2;_n_noop:1,2;_c,_nc:4c,1,2;_x:1,2c;_ex:1,2c;_nx:4c,1,2;_nx_noop:4c,1,2;\n"
+"X-Poedit-Basepath: ../\n"
+"X-Poedit-Bookmarks: \n"
+"X-Poedit-SearchPath-0: .\n"
+"X-Textdomain-Support: yes"
+
+#. translators: plugin header field 'Name'
+#: WCDFE.php:0
+#@ WCDFE_translation
+msgid "WP Change Default From Email"
+msgstr ""
+
+#. translators: plugin header field 'Description'
+#: WCDFE.php:0
+#@ WCDFE_translation
+msgid "A simple and easy way to change the from email address and from email name that appear on emails sent from WordPress."
+msgstr "وهناك طريقة بسيطة وسهلة لتغيير من عنوان البريد الإلكتروني و اسم من البريد الإلكتروني التي تظهر على رسائل البريد الإلكتروني المرسلة من وورد."
+
+#. translators: plugin header field 'Author'
+#: WCDFE.php:0
+#@ WCDFE_translation
+msgid "Subodh Ghulaxe"
+msgstr ""
+
+#. translators: plugin header field 'Version'
+#: WCDFE.php:0
+#@ WCDFE_translation
+msgid "1.1.0"
+msgstr ""
+
+#: WCDFE.php:147
+#: admin/pages/settings.php:7
+#@ WCDFE_translation
+msgid "Settings"
+msgstr "الإعدادات"
+
+#: WCDFE.php:166
+#@ WCDFE_translation
+msgid "Donate"
+msgstr "تبرع"
+
+#: admin/WCDFE_Admin.php:63
+#@ WCDFE_translation
+msgid "Change From Email"
+msgstr "التغيير من البريد الإلكتروني"
+
+#: admin/WCDFE_Admin.php:86
+#@ WCDFE_translation
+msgid "<b>From Name</b> must not be empty."
+msgstr "من الاسم يجب ألا تكون فارغة ."
+
+#: admin/WCDFE_Admin.php:91
+#@ WCDFE_translation
+msgid "<b>From Email</b> must be a valid email address."
+msgstr "من البريد الإلكتروني يجب أن يكون عنوان بريد إلكتروني صالح ."
+
+#: admin/WCDFE_Admin.php:99
+#@ WCDFE_translation
+msgid "Settings updated successfully."
+msgstr "ضبط تجديد بنجاح."
+
+#: admin/WCDFE_Admin.php:102
+#@ WCDFE_translation
+msgid "No settings were updated."
+msgstr "لم يتم تحديث الإعدادات."
+
+#: admin/pages/settings.php:8
+#@ WCDFE_translation
+msgid "Help"
+msgstr "مساعدة"
+
+#: admin/pages/settings.php:19
+#@ WCDFE_translation
+msgid "Enable/Disable"
+msgstr "تمكين / تعطيل"
+
+#: admin/pages/settings.php:32
+#@ WCDFE_translation
+msgid "From Name"
+msgstr "من الاسم"
+
+#: admin/pages/settings.php:39
+#@ WCDFE_translation
+msgid "From Email"
+msgstr "من البريد الإلكتروني"
+
+#: admin/pages/settings.php:42
+#@ WCDFE_translation
+msgid "To avoid your email being marked as spam, it is highly recommended that your \"from\" domain match your website."
+msgstr "لتجنب البريد الإلكتروني الخاص بك يتم وضع علامة كدعاية، فإنه يوصى بشدة بأن ما تتمتعون به \\\" من \\\" مجال تطابق موقع الويب الخاص بك ."
+
+#: admin/pages/settings.php:52
+#@ WCDFE_translation
+msgid "Save Settings"
+msgstr "حفظ الإعدادات"
+
+#: admin/pages/settings.php:61
+#@ WCDFE_translation
+msgid "If mails are going in spam."
+msgstr "إذا رسائل تسير في البريد المزعج."
+
+#: admin/pages/settings.php:62
+#@ WCDFE_translation
+msgid "To avoid your email being marked as spam, it is highly recommended that your domain name in 'From Email' must match with your website, i.e. if your website is <code>www.example.com</code> then your email must hosted on <code>@example.com</code>."
+msgstr "لتجنب البريد الإلكتروني الخاص بك يتم وضع علامة كدعاية، ويوصى بشدة أن اسم النطاق الخاص بك في \\\"من البريد الإلكتروني ' يجب أن تتطابق مع موقع الويب الخاص بك ، أي إذا كان موقع الويب الخاص بك هو www.example.com ثم يجب البريد الإلكتروني الخاص بك استضافتها على @ example.com ."
+
+#: admin/pages/settings.php:65
+#@ WCDFE_translation
+msgid "Do you offer support?"
+msgstr "هل تقدم الدعم؟"
+
+#: admin/pages/settings.php:66
+#@ WCDFE_translation
+msgid "You can contact me at my email address"
+msgstr "يمكنك الاتصال بي على عنوان بريدي الإلكتروني"
+
+#: admin/pages/settings.php:118
+#@ WCDFE_translation
+msgid "No settings were saved."
+msgstr "لم يتم حفظ الإعدادات."
+

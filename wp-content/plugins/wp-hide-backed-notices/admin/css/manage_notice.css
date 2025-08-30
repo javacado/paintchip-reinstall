@@ -1,0 +1,29 @@
+.setting-top-wrap .save_post_gallery_box_cls{padding:10px 40px;border:2px solid transparent;background:#df6127;color:#fff;font-weight:700;border-radius:5px;margin-top:20px;cursor:pointer}
+.setting-top-wrap input#save_post_gallery_box_id:hover{background:#29bb80!important}
+.setting-top-wrap .outer-gallery-box{margin-left:10px}
+.setting-top-wrap .wp_checkbox_container{display:block;position:relative;padding-left:35px;margin-bottom:22px;cursor:pointer;font-size:22px;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}
+.setting-top-wrap .wp_checkbox_container input{position:absolute;opacity:0}
+.main-wrap.setting-top-wrap{margin-right:20px;margin-top:20px}
+.main-wrap.setting-top-wrap .tablink{background-color:#df6127}
+.setting-top-wrap .tab{overflow:hidden;background-color:#e4e4e4a6;border:1px solid #df6127}
+.setting-top-wrap .tab button{background-color:inherit;float:left;border:none;outline:0;cursor:pointer;padding:14px 16px;transition:.3s;font-size:17px;font-weight:500;color:#df6127}
+.setting-top-wrap .tab button.active{background-color:#df6127;color:#fff;font-weight:500}
+.setting-top-wrap .tabcontent{display:none;padding:6px 12px;border:1px solid #df6127;border-top:none}
+.main-wrap.setting-top-wrap .tab img{height:18px;vertical-align:middle;margin-bottom:4px}
+.setting-top-wrap .checkboxes-manage h4{margin-bottom:10px}
+body.wp-admin #Notifications .update-nag{display:block!important}
+div#Notifications{padding-bottom:20px!important}
+.setting-top-wrap .switch{position:relative;display:inline-block;width:60px;height:34px}
+.setting-top-wrap .switch input{opacity:0;width:0;height:0}
+.setting-top-wrap .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#ccc;-webkit-transition:.4s;transition:.4s}
+.setting-top-wrap .slider:before{position:absolute;content:"";height:26px;width:26px;left:4px;bottom:4px;background-color:#fff;-webkit-transition:.4s;transition:.4s}
+.setting-top-wrap input:checked+.slider{background-color:#df6127}
+.setting-top-wrap input:focus+.slider{box-shadow:0 0 1px #2196F3}
+.setting-top-wrap input:checked+.slider:before{-webkit-transform:translateX(26px);-ms-transform:translateX(26px);transform:translateX(26px)}
+.setting-top-wrap .slider.round{border-radius:34px}
+.setting-top-wrap .slider.round:before{border-radius:50%}
+.save_btn_wrapper{margin-bottom:15px}
+body.wp-admin #Notifications .update-nag, body.wp-admin #Notifications .updated, body.wp-admin #Notifications .error, body.wp-admin #Notifications .is-dismissible, body.wp-admin #Notifications .notice{display:block!important}
+body.wp-admin .notice-success{display: block !important}
+
+#wp-admin-bar-hide-notifications .ab-item:before {content: " ";background-image: url(../images/hide-dash-menu.png) !important;background-size: 20px 20px;background-repeat: no-repeat;height: 20px;width: 20px;position: relative;top: 5px;}
