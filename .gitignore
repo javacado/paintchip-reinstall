@@ -1,0 +1,74 @@
+# ----------------------------------------------------
+# Core WordPress files (downloadable from wordpress.org)
+# ----------------------------------------------------
+/wp-admin/
+/wp-includes/
+/license.txt
+/readme.html
+/wp-config.php
+/wp-config-sample.php
+
+# ----------------------------------------------------
+# WordPress content
+# (Keep themes & plugins you are developing;
+#  ignore uploads, cache, and backup folders)
+# ----------------------------------------------------
+# Ignore all plugins except custom ones
+wp-content/plugins/*
+!wp-content/plugins/my-custom-plugin/
+
+# Ignore all themes except custom one
+wp-content/themes/*
+!wp-content/themes/my-custom-theme/
+
+# Uploads, cache, upgrade dirs
+wp-content/uploads/
+wp-content/cache/
+wp-content/upgrade/
+wp-content/backups/
+wp-content/ai1wm-backups/
+
+# ----------------------------------------------------
+# Logs, debug files
+# ----------------------------------------------------
+*.log
+debug.log
+error_log
+*.sql
+*.sql.gz
+
+# ----------------------------------------------------
+# OS / Editor / IDE junk
+# ----------------------------------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+*.swp
+*.swo
+*~
+.project
+.settings/
+.idea/
+.vscode/
+nbproject/
+*.iml
+
+# ----------------------------------------------------
+# Composer / Node (if you’re using them)
+# ----------------------------------------------------
+/vendor/
+/node_modules/
+/npm-debug.log
+/yarn-error.log
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# ----------------------------------------------------
+# Environment / secrets
+# ----------------------------------------------------
+.env
+.env.local
+.env.*.local
+
