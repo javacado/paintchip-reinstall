@@ -1,2 +1,5 @@
 /wp-config.php
 /wp-config-sample.php
+/wp-content/plugins/
+/wp-content/uploads/
+
