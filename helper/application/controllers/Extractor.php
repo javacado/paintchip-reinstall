@@ -1,14 +1,16 @@
 <?php
 defined('BASEPATH') OR exit('No direct script access allowed');
-// ini_set('display_errors', 1);
-// error_reporting(E_ALL);
+
+
+ ini_set('display_errors', 1);
+error_reporting(E_ERROR);
 class Extractor extends CI_Controller {
 	function __construct() {
 
 		parent::__construct();
 			$this->load->model('wp_auth_model');
 	$this->base_url = "http://paintchip-helper.test/";
-		$this->local_image_path = "2020/06/";
+		$this->local_image_path = "2025/09/";
 		$this->img_dir = "wp-content/uploads/" . $this->local_image_path;
 		$this->temp_img_dir = $_SERVER['DOCUMENT_ROOT'] . "/helper/uploads/";
 		$this->prod_img_dir = $_SERVER['DOCUMENT_ROOT'] . "/" . $this->img_dir;
@@ -1431,10 +1433,269 @@ post_mime_type like image/jpeg
 		die("<h3>INSERTED</h3><pre>" . print_r(count($used), 1) . "</pre>");
 	}
 
+	function findNoSku() {
+		$post_ids=[];
+		 $q="select * from wp_postmeta where meta_key='_stock_status' and meta_value='outofstock'";
+		 $r = $this->db->query($q);
+		// $kill=[];
+		 foreach ($r->result() as $row){
+	 	$post_ids[]=$row->post_id;
+		 }
+		die("COUTN:".count($post_ids)." " . implode(" ", $post_ids));
+
+		// 	$q="select * from wp_posts where ID = ".$row->post_id;
+		// 	$rr = $this->db->query($q);
+		// 	if ($rr->num_rows()==0) {
+		// 		// remove the postmeta
+
+		// 		//echo "<BR> Kill me: ". $row->post_id;
+		// 		$kill[]= "(".$row->post_id.")";
+		// 	}
+		// }
+
+		// die(implode(",",$kill));
+
+		// find any that do not actually exist
+
+
+
+		$q = "select * from wp_postmeta where post_id in (" . implode(",", $post_ids) . ") and meta_key='_sku' and meta_value!=''";
+		$r = $this->db->query($q);
+
+		$has_sku=[];
+
+		foreach ($r->result() as $row) {
+		$has_sku[]=$row->post_id;	
+		}
+
+		$diff = array_diff($post_ids, $has_sku);
+		//return
+$no_sku=[];
+		foreach($post_ids as $d) {
+			//$q = "select * from wp_posts where ID=$d";
+			//$r = $this->db->query($q)->row();
+			//if (!in_array($d, $has_sku)) echo "<br><a href='https://paintchip.test/wp-admin/post.php?post=$d&action=edit'> $r->post_title</a>";
+			if (!in_array($d, $has_sku)) $no_sku[]=$d;
+		}
+		die(implode(" ", $no_sku));
+
+		// die("C".count($diff));
+	}
+
+
+		function findOuts() {
+
+		// $all = $this->getCSV("/helper/extractor/getCSV/Inventory_Master_Processed.csv");
+		// $q = "select * from jt_supplier_data";
+		// $r = $this->db->query($q);
+		// $skus = [];
+		// foreach ($r->result() as $row){
+		// 	$skus[]="'" . $row->sku . "'";
+		// }
+
+		ini_set("memory_limit", "500M");
+		$file = $_SERVER['DOCUMENT_ROOT'] . "/helper/assets/inv_get_qty_processed.csv";
+
+		$this->load->helper('file');
+
+		$f = read_file($file);
+		$f = str_replace("\r", "\n", $f);
+		$lines = explode("\n", $f);
+		$allitems = array();
+
+		$removals = array();
+
+
+		$lctr = 0;
+		$skus = [];
+		$zero_qty_skus=[];
+
+		foreach ($lines as $line) {
+			$linedata = $line;
+			$line = explode(",", $line);
+
+			//if ($line[0] != "SS") continue;
+			$sku = $line[5];
+			if (!$sku) continue;
+			
+			$skus[]="'" . trim($sku) . "'";
+
+			$price = $line[8];
+			$price = preg_replace("/[^0-9.]/", "", $price);
+
+			$stock = $line[2];
+			if (intval($stock)==0) {
+				$lctr++;
+				$zero_qty_skus[]="'".$sku."'";
+				echo "<br>delete sku:".$sku;
+			}
+
+		}
+		$post_ids = [];
+
+		// fix zero qty
+
+		$q = "select * from wp_postmeta where meta_key='_sku' and meta_value  in (" . implode(",", $zero_qty_skus) . ")";
+		$r = $this->db->query($q);
+		foreach ($r->result() as $row) {
+			$post_ids[] = $row->post_id;
+		}
+
+		$q = "update wp_postmeta set meta_value='outofstock' where meta_key='_stock_status' and post_id in (" . implode(",", $post_ids) . ")";
+		$r = $this->db->query($q);
+		die("<br>done ");
+
+
+		$q = "select * from wp_postmeta where meta_key='_sku' and meta_value not in (".implode(",",$skus).")";
+ 		$r = $this->db->query($q);
+		$post_ids=[];
+		foreach ($r->result() as $row ) {
+			$post_ids[]=$row->post_id;
+		}
+
+
+		$q = "update wp_postmeta set meta_value='outofstock' where meta_key='_stock_status' and post_id in (" . implode(",", $post_ids) . ")";
+		$r = $this->db->query($q);
+		die("<br>done ");
+	}
+
+	function oos() {
+		$post_ids = [];
+		$q = "select * from wp_postmeta where meta_key='_stock_status' and meta_value='outofstock'";
+		$r = $this->db->query($q);
+		foreach ($r->result() as $row) {
+			$post_ids[] = $row->post_id;
+		}
+		//die("C".count($post_ids));
+		echo implode(" ", $post_ids);
+	}
+
+	function fixStock() {
+		ini_set("memory_limit", "500M");
+		$file = $_SERVER['DOCUMENT_ROOT'] . "/helper/assets/inv_get_qty_processed.csv";
+
+		$this->load->helper('file');
+
+		$f = read_file($file);
+		$f = str_replace("\r", "\n", $f);
+		$lines = explode("\n", $f);
+		$allitems = array();
+
+		$removals = array();
+
+
+		$lctr = 0;
+
+		foreach ($lines as $line) {
+			$linedata = $line;
+			$line = explode(",", $line);
+
+			if ($line[0] != "SS") continue;
+			$sku = $line[5];
+			$price = $line[8];
+			$price = preg_replace("/[^0-9.]/", "", $price);
+
+			$stock = $line[2];
+
+			//echo "<BR> - $sku - $price - $stock";
+
+			$q = "select * from jt_supplier_data where sku='$sku'";
+			$r = $this->db->query($q);
+			foreach ($r->result() as $row) {
+				$row->quantity = $stock;
+				$row->price = $price;
+				//$row->suggestedprice = $price;
+				if ($row->data!="") {
+					$d = json_decode($row->data);
+					$d->quantity = $stock;
+					$d->price = $price;
+					$row->data = json_encode($d);
+				} else if($row->tmp_data != "") {
+					$d = json_decode($row->tmp_data);
+					$d->quantity = $stock;
+					$d->price = $price;
+					$row->tmp_data = json_encode($d);
+				}
+				$up = $this->db->update("jt_supplier_data",$row,"id=".$row->id);
+				if (!$up) die("db error");
+				//echo("<h3>Output</h3><pre>" . print_r($row, 1) . "</pre>");
+
+			}
+			
+
+		}
+	}
+
 	function getCSV($file) {
 
 		ini_set("memory_limit", "500M");
-		$file = $_SERVER['DOCUMENT_ROOT'] . "/helper/assets/{$file}.csv";
+		$file = $_SERVER['DOCUMENT_ROOT'] . "/helper/assets/{$file}";
+
+		$this->load->helper('file');
+
+		$f = read_file($file);
+		$f = str_replace("\r", "\n", $f);
+		$lines = explode("\n", $f);
+		$allitems = array();
+
+		$removals = array();
+
+		
+		$lctr = 0;
+		
+		foreach ($lines as $line) {
+			$linedata = $line;
+$line = explode(",",$line);
+
+			if ($line[0]!="SS") continue;
+			$sku = $line[3];
+			$q="select * from wp_postmeta where meta_key='_sku' and meta_value='$sku'";
+			$r = $this->db->query($q);
+			if ($r->num_rows()>0) continue;
+$price = $line[6];
+$price = preg_replace("/[^0-9.]/", "",$price);
+$stock = $line[8];
+//if ($stock==0) $stock .= " <strong style='color:red'>DELETE</strong>";
+			//example
+			// AD,AD1002-DG-,1002,1002-DG-,1002DG81,$10.23,$30.69 EA,0,4
+			$itema = array(
+					"id" => $sku,
+					"title" => "",
+				"price" => $price,
+				"theprice" => $price,
+					"supplier" => $line[0],
+				"linedata" => $linedata,
+				"stock" => $stock,
+					"category" => "",
+
+				);
+
+			
+			//die("<h3>Output</h3><pre>" . print_r($itema, 1) . "</pre>");
+
+			$allitems[] = $itema;
+
+
+			$lctr++;
+		}
+		
+						//die("<h3>Output</h3><pre>" . print_r($strline, 1) . "</pre>");
+
+		//die("<h3>Output</h3><pre>" . print_r($searchlines, 1) . "</pre>");
+		$out = array("allitems" => $allitems);
+		//	die("<h3>Output</h3><pre>" . print_r($out, 1) . "</pre>");
+		echo json_encode($out);
+		//echo ("<h3>Output- found: " . count($allitems) . " / not found: " . count($noids) . "</h3><pre>" . print_r($allitems, 1) . "</pre>");
+
+	}
+
+
+
+	function getCSV_OLD($file)
+	{
+
+		ini_set("memory_limit", "500M");
+		$file = $_SERVER['DOCUMENT_ROOT'] . "/helper/assets/{$file}";
 
 		$this->load->helper('file');
 
@@ -1519,7 +1780,6 @@ post_mime_type like image/jpeg
 
 					continue;
 				}
-
 			} else {
 				$line_type = 'second';
 
@@ -1554,7 +1814,6 @@ post_mime_type like image/jpeg
 					//$searchlines[] = $line;
 				}
 				$itema = null;
-
 			}
 			$lctr++;
 		}
@@ -1583,7 +1842,6 @@ post_mime_type like image/jpeg
 			} else {
 				$new_noids[] = $line;
 			}
-
 		}
 
 		//die("<h3>Output</h3><pre>" . print_r($searchlines, 1) . "</pre>");
@@ -1823,10 +2081,15 @@ post_mime_type like image/jpeg
 		//phpinfo();
 
 		$tries = 1;
-
+$checking = false;
+		$exists=0;
+if ($checking){
 		$q = "select * from jt_supplier_data where sku='$id' order by data desc";
 		$result = $this->db->query($q)->result();
 		$exists = count($result) > 0;
+}
+		// echo "<br>exists? $exists"; //devv
+		// return;//devv
 
 		if ($exists) {
 			$out = array();
@@ -1940,13 +2203,13 @@ post_mime_type like image/jpeg
 
 		$out['img'] = $oimg;
 		$out['orig_img'] = $img;
-		$out['linedata'] = $this->input->post('linedata');
+		//$out['linedata'] = $this->input->post('linedata');
 
 		$d = $this->input->post('data_batch');
 		if (!$d) {
 			$d = 'retry';
 		}
-
+$out['here']=1;
 		$out = json_encode($out);
 		$in = array(
 			"sku" => $id,
@@ -1965,6 +2228,10 @@ post_mime_type like image/jpeg
 
 		}
 
+
+		// try to get category
+		$category=$this->getCategoryFromSLS($id);
+
 		if ($this->db->insert("jt_supplier_data", $in)) {
 			if ($this->input->post('oneoff') == 1) {
 				$this->db->query('delete from jt_supplier_data where sku="' . $this->input->post('origid') . '" and data=""');
@@ -1973,6 +2240,101 @@ post_mime_type like image/jpeg
 
 		die($out);
 
+	}
+
+	function getCategoriesFromSLS(){
+	ini_set("memory_limit", "500M");
+		set_time_limit(300);
+		$skus = $this->db->query("select * from jt_supplier_data where data!='' and category='' order by id asc limit 1")->result();
+		if (count($skus)==0) {
+			die(json_encode(["status" => "done"]));
+		}
+		$out = $this->getCategoryFromSLS($skus[0]->sku);
+		//die(print_r($out));
+		die(json_encode(["status" => "more", "sku"=> $skus[0]->sku, "out" => $out]));
+	}
+
+	function getCategoryFromSLS($sku) {
+	
+		$url = "https://slsarts.com/visual_right.asp?txtfind=$sku";
+
+
+
+		$options = array(
+			CURLOPT_RETURNTRANSFER => true, // return web page
+			CURLOPT_HEADER => false, // do not return headers
+			CURLOPT_FOLLOWLOCATION => true, // follow redirects
+			CURLOPT_USERAGENT => "spider", // who am i
+			CURLOPT_AUTOREFERER => true, // set referer on redirect
+			CURLOPT_CONNECTTIMEOUT => 120, // timeout on connect
+			CURLOPT_TIMEOUT => 120, // timeout on response
+			CURLOPT_MAXREDIRS => 10, // stop after 10 redirects
+		);
+		$ch = curl_init($url);
+		curl_setopt_array($ch, $options);
+		$content = curl_exec($ch);
+		$err = curl_errno($ch);
+		$errmsg = curl_error($ch);
+		$header = curl_getinfo($ch);
+		curl_close($ch);
+
+		 $level1 = explode("?gogetsku=$sku&level1=", $content);
+		 $level1 =  trim(strtolower(explode("&", $level1[1])[0]));
+
+
+		$level2 = explode("&level2=", $content);
+		$level2 = trim(strtolower(explode("&", $level2[1])[0]));
+
+if ($level2=="drawing supplies") $level2 = "pencils and drawing supplies";
+		if ($level1 == "drawing supplies") $level1= "pencils and drawing supplies";
+
+		$q= "SELECT t.term_id, t.name, t.slug, tt.count
+		FROM wp_terms t
+		JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id
+		WHERE tt.taxonomy = 'product_cat'
+		AND (LOWER(t.name) ='$level2'
+       OR LOWER(t.slug) ='$level2')
+		ORDER BY t.name;";
+		$r = $this->db->query($q)->result();
+		$qq="NO CAT FOUND for $level2 (level1 was $level1)";
+		if (count($r)>0) {
+			$cat_name =$r[0]->name;
+			$cat_id = $r[0]->term_id;
+			//die($cat_name."--".$cat_id);
+			$out=["name" => $cat_name, "id" => $cat_id];
+			$out = json_encode($out);
+			$qq = "update jt_supplier_data set category='$out' where sku='$sku'";
+			$this->db->query($qq);
+		} else {
+
+
+			$q = "SELECT t.term_id, t.name, t.slug, tt.count
+		FROM wp_terms t
+		JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id
+		WHERE tt.taxonomy = 'product_cat'
+		AND (LOWER(t.name) ='$level1'
+       OR LOWER(t.slug) ='$level1')
+		ORDER BY t.name;";
+			$r = $this->db->query($q)->result();
+			$qq = "NO CAT FOUND for LEVEL1 $level1 $level2";
+			if (count($r) > 0) {
+				$cat_name = $r[0]->name;
+				$cat_id = $r[0]->term_id;
+				//die($cat_name."--".$cat_id);
+				$out = ["name" => $cat_name, "id" => $cat_id];
+				$out = json_encode($out);
+				$qq = "update jt_supplier_data set category='$out' where sku='$sku'";
+				$this->db->query($qq);
+			}
+			else {
+				$qr = "update jt_supplier_data set category='---' where sku='$sku'";
+				$this->db->query($qr);
+			}
+
+		}
+
+return $qq;
+		
 	}
 
 	function getMyCategoryFromLinkData($ldata) {
@@ -2507,7 +2869,7 @@ post_mime_type like image/jpeg
 			$cat->name = "CLAYS AND Accessories";
 			// navigate...
 			$ucat = urlencode(strtoupper($cat->name));
-			$turl = "https://www.slsarts.com/fright.asp?level1=$ucat";
+			$turl = "https://www.imarts.com/fright.asp?level1=$ucat";
 			echo "<P>$turl";
 			$html = file_get_html($turl);
 			//die("<h3>Output</h3><pre>" . print_r($html, 1) . "</pre>");
@@ -2747,7 +3109,7 @@ post_mime_type like image/jpeg
 	}
 
 	function doonce() {
-		$q = "select * from jt_supplier_data where data!='' and approved=1 and (title='' or description='' or image='') order by category asc, suggestedprice desc, price asc ";
+		$q = "select * from jt_supplier_data where data!='' and approved=1 order by category asc limit 1 ";
 		$r = $this->db->query($q);
 		$rr = $r->result();
 		$r->free_result();
@@ -2776,9 +3138,9 @@ post_mime_type like image/jpeg
 				}
 				$new['image'] = $row->data->img;
 				//$hasimg = $this->getImage($row->data->orig_img, $row->data->img);
-				//die("<h3>Output</h3><pre>" . print_r($row->data->img . " -" . $row->data->orig_img, 1) . "</pre>");
+				die("<h3>Output</h3><pre>" . print_r($new,1)." --- " . print_r($row, 1)  . "</pre>");
 			}
-
+die("HERE");
 			/*if (!$row->category && $row->data->category != '') {
 				$new['category'] = $row->data->category;
 			}*/
@@ -3518,28 +3880,46 @@ post_mime_type like image/jpeg
 
 		ini_set('display_errors', 1);
 		ini_set('display_startup_errors', 1);
-		error_reporting(E_ALL);
+		error_reporting(E_ERROR);
 
 		/*$str = 'a:5:{s:5:"width";i:225;s:6:"height";i:225;s:4:"file";s:19:"2020/03/images.jpeg";s:5:"sizes";a:0:{}s:10:"image_meta";a:12:{s:8:"aperture";s:1:"0";s:6:"credit";s:0:"";s:6:"camera";s:0:"";s:7:"caption";s:0:"";s:17:"created_timestamp";s:1:"0";s:9:"copyright";s:0:"";s:12:"focal_length";s:1:"0";s:3:"iso";s:1:"0";s:13:"shutter_speed";s:1:"0";s:5:"title";s:0:"";s:11:"orientation";s:1:"0";s:8:"keywords";a:0:{}}}';
 		die("<h3>Output</h3><pre>" . print_r(unserialize($str), 1) . "</pre>");*/
 
-		// $go = 0;
-		$cats = $this->getLiveCats();
+		// $q = "update jt_supplier_data  set category='' where category='---'";
+		// $rr = $this->db->query($q);
+ 
+		// 			$q = "select * from jt_supplier_data where data!=''  and category!='' and moved=0 order by id asc";
 
-		foreach ($cats as $cat) {
-			echo "<p>Using Cat " . print_r($cat->name, 1);
+		// 			$rr = $this->db->query($q);
+		// 			$r = $rr->result();
+		// 			$rr->free_result();
 
-			$q = "select * from jt_supplier_data where category='{$cat->name}' and moved=0 and approved=1 order by image desc, id asc limit 500";
-			echo "<P>$q";
+		// 			foreach ($r as $row) {
+		// 				$cat = json_decode($row->category);
+		// 				$data = json_decode($row->data);
+		// 				$img = $data->img;
 
-			$rr = $this->db->query($q);
-			$r = $rr->result();
-			$rr->free_result();
+		// 				$i = ["title"  => $data->title, "approved"=>1,"description" => $data->description, "image" => $img, "suggestedprice" => $row->price , "cat_id"=>$cat->id];
+		// 				$this->db->update("jt_supplier_data", $i, "id=".$row->id);
+		//  			}
+		// die("DD");
 
-			foreach ($r as $row) {
-				//echo ("<p> going for it " . print_r($row, 1));
 
-				$in = $this->getPostInsertA($row);
+		$q = "select * from jt_supplier_data where data!='' and image!='' and category!='' and moved=0 and approved=1 order by id asc limit 500";
+
+		$rr = $this->db->query($q);
+		$r = $rr->result();
+		$rr->free_result();
+
+		if (count($r)==0) die("FINISHED");
+ 
+		foreach ($r as $row) {
+
+$the_cat_id = $row->cat_id;
+if (!$the_cat_id) die("NO CAT");
+			//echo ("<p> going for it " . print_r($row, 1));
+
+			$in = $this->getPostInsertA($row);
 				echo "<p>" . $this->db->insert_string("wp_posts", $in);
 				if ($go) {
 					$done = $this->db->insert("wp_posts", $in);
@@ -3573,7 +3953,7 @@ post_mime_type like image/jpeg
 						$image_post_id = "NEW-IMAGE-POSTID";
 					}
 
-					echo "<P>moving " . $this->temp_img_dir . $row->image . " to " . $this->prod_img_dir . $row->image;
+					echo "<P>moving " . $this->temp_img_dir . $row->image . " (file exists? ".file_exists($this->temp_img_dir . $row->image).") -- to " . $this->prod_img_dir . $row->image;
 					if ($go) {
 						copy($this->temp_img_dir . $row->image, $this->prod_img_dir . $row->image);
 					}
@@ -3586,7 +3966,7 @@ post_mime_type like image/jpeg
 
 						"width" => $sz[0],
 						"height" => $sz[1],
-						"file" => "2020/06/" . $row->image,
+						"file" => "2025/09/" . $row->image,
 						"sizes" => Array
 						(
 						),
@@ -3623,7 +4003,7 @@ post_mime_type like image/jpeg
 
 				}
 
-				$up = array("object_id" => $post_id, "term_taxonomy_id" => $cat->term_id);
+				$up = array("object_id" => $post_id, "term_taxonomy_id" =>  $the_cat_id);
 				if ($go) {
 					$this->db->insert("wp_term_relationships", $up);
 				}
@@ -3648,7 +4028,7 @@ post_mime_type like image/jpeg
 				//echo ("<h3>Output</h3><pre>" . print_r("DONE", 1) . "</pre>");
 
 			}
-		}
+		
 
 	}
 
@@ -3832,7 +4212,6 @@ post_mime_type like image/jpeg
 		$safetitle = preg_replace('/[^a-z0-9]+/i', '-', $safetitle); # or...
 		$safetitle = preg_replace('/[^a-z\d]+/i', '-', $safetitle);
 		$safetitle = str_replace(" ", "-", $safetitle);
-
 		//if (strtoupper($title) == $title) {
 		//}
 		$a = array(
