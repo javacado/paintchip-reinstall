@@ -344,7 +344,7 @@ $out='';
 					$curp = $curprice[$d->post_id];
 				}
 				if (!$curp) {
-					die('<p>no price for ' . $curp);
+					die('<p>no price for ' . $curp . '<pre>'.print_r($d,1));
 				}
 
 				$d->curp = $curp;
