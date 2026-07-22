@@ -421,10 +421,7 @@ input {
 	transition: color 0.1s ease-in-out, background-color 0.1s ease-in-out;
 }
 
-a,
-a:visited,
-a:hover,
-a:focus {
+a {
 	text-decoration: none;
 }
 
@@ -488,7 +485,6 @@ a:focus {
 .screen-reader-text {
 	border: 0;
 	clip: rect(1px, 1px, 1px, 1px);
-	-webkit-clip-path: inset(50%);
 	clip-path: inset(50%);
 	height: 1px;
 	margin: -1px;
@@ -504,7 +500,6 @@ a:focus {
 	border-radius: 3px;
 	box-shadow: 0 0 2px 2px rgba(0, 0, 0, 0.6);
 	clip: auto !important;
-	-webkit-clip-path: none;
 	clip-path: none;
 	color: #21759b;
 	display: block;
@@ -666,6 +661,10 @@ a:focus {
 .main-navigation .main-nav ul li.menu-item-has-children > a {
 	padding-right: 0;
 	position: relative;
+}
+
+.main-navigation.sub-menu-left ul ul {
+	box-shadow: -1px 1px 0 rgba(0, 0, 0, 0.1);
 }
 
 .main-navigation.sub-menu-left .sub-menu {
@@ -1100,6 +1099,13 @@ object {
 }
 
 /*--------------------------------------------------------------
+## Post Loop Block
+--------------------------------------------------------------*/
+.wp-block-post-template {
+	margin-left: 0;
+}
+
+/*--------------------------------------------------------------
 # Widgets
 --------------------------------------------------------------*/
 .widget-area .widget {
@@ -1210,8 +1216,8 @@ object {
 	margin: 0px 40px 0px 40px;
 }
 
-.one-container.archive .post:not(:last-child),
-.one-container.blog .post:not(:last-child) {
+.one-container.archive .post:not(:last-child):not(.is-loop-template-item),
+.one-container.blog .post:not(:last-child):not(.is-loop-template-item) {
 	padding-bottom: 40px;
 }
 
@@ -1254,8 +1260,7 @@ object {
 	margin-bottom: 20px;
 }
 
-.inside-page-header,
-.wp-block-group__inner-container {
+.inside-page-header {
 	padding: 40px;
 }
 
@@ -1501,6 +1506,12 @@ nav.toggled ul ul.sub-menu {
 .main-navigation.toggled .main-nav ul ul {
 	transition: 0s;
 	visibility: hidden;
+	box-shadow: none;
+	border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.main-navigation.toggled .main-nav ul ul li:last-child > ul {
+	border-bottom: 0;
 }
 
 .main-navigation.toggled .main-nav ul ul.toggled-on {

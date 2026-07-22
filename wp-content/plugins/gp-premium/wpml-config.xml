@@ -11,6 +11,7 @@
     </key>
     <key name="generate_menu_plus_settings">
       <key name="mobile_menu_label"/>
+      <key name="off_canvas_desktop_toggle_label"/>
     </key>
     <key name="generate_hooks">
       <key name="generate_wp_head"/>
@@ -39,6 +40,7 @@
   <custom-fields>
 	  <custom-field action="translate">_generate_element_content</custom-field>
 	  <custom-field action="copy-once">_generate_element_type</custom-field>
+	  <custom-field action="copy-once">_generate_block_type</custom-field>
 	  <custom-field action="copy-once">_generate_element_display_conditions</custom-field>
 	  <custom-field action="copy-once">_generate_element_exclude_conditions</custom-field>
 	  <custom-field action="copy-once">_generate_element_user_conditions</custom-field>

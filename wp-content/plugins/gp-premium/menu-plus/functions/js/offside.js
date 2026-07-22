@@ -497,32 +497,51 @@
 /**
  * Start GP.
  */
-document.addEventListener( 'DOMContentLoaded', function() {
-	document.querySelector( '.slideout-navigation' ).style.display = '';
-} );
-
 var generateOffside = offside( '.slideout-navigation', {
     slidingElementsSelector:'#slideout-container',
     buttonsSelector: '.slideout-mobile .main-navigation .menu-toggle, .slideout-both .main-navigation .menu-toggle, .slideout-both .slideout-toggle, .slideout-desktop .slideout-toggle',
 	slidingSide: offSide.side,
+	beforeOpen: function() {
+		document.querySelector( '.slideout-navigation' ).classList.add( 'slideout-transition' );
+	},
 	afterOpen: function() {
+		setTimeout( function() {
+			document.querySelector( '.slideout-navigation' ).classList.remove( 'slideout-transition' );
+		}, 10 );
+
 		document.documentElement.classList.add( 'slide-opened' );
 		document.body.classList.add( 'slide-opened' );
 
-		// Get the first link so we can focus on it.
-		var slideoutMenu = document.querySelector( 'ul.slideout-menu' );
+		if ( document.body.classList.contains( 'dropdown-hover' ) ) {
+			var dropdownItems = document.querySelector( '.slideout-navigation' ).querySelectorAll( 'li.menu-item-has-children' );
+			for ( var i = 0; i < dropdownItems.length; i++ ) {
+				var spanToggle = dropdownItems[i].querySelector( 'span.dropdown-menu-toggle' );
 
-		if ( slideoutMenu ) {
-			var firstLink = slideoutMenu.firstChild.querySelector( 'a' );
-
-			if ( firstLink ) {
-				setTimeout( function() {
-					firstLink.focus();
-				}, 200 );
+				if ( spanToggle ) {
+					spanToggle.setAttribute( 'tabindex', 0 );
+					spanToggle.setAttribute( 'role', 'button' );
+					spanToggle.setAttribute( 'aria-expanded', true );
+				}
 			}
 		}
+
+		// Focus the first focusable element.
+		var focusable = document.querySelector( '.slideout-navigation' ).querySelectorAll( 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])' );
+
+		if ( focusable ) {
+			setTimeout( function() {
+				focusable[0].focus();
+			}, 200 );
+		}
+	},
+	beforeClose: function() {
+		document.querySelector( '.slideout-navigation' ).classList.add( 'slideout-transition' );
 	},
 	afterClose: function() {
+		setTimeout( function() {
+			document.querySelector( '.slideout-navigation' ).classList.remove( 'slideout-transition' );
+		}, 500 );
+
 		var body = document.body,
 			nav = document.querySelectorAll( '.main-navigation' );
 
@@ -540,7 +559,7 @@ var generateOffside = offside( '.slideout-navigation', {
 		}
 
 		if ( body.classList.contains( 'dropdown-hover' ) ) {
-			var dropdownItems = document.querySelector( '.main-navigation:not(.slideout-navigation)' ).querySelectorAll( 'li.menu-item-has-children' );
+			var dropdownItems = document.querySelector( '.main-navigation:not(.slideout-navigation):not(.mobile-menu-control-wrapper)' ).querySelectorAll( 'li.menu-item-has-children' );
 			for ( var i = 0; i < dropdownItems.length; i++ ) {
 				var spanToggle = dropdownItems[i].querySelector( 'span.dropdown-menu-toggle' );
 
@@ -588,20 +607,40 @@ for ( var i = 0; i < slideoutLinks.length; i++ ) {
 document.addEventListener( 'keyup', function( e ) {
 	if ( document.body.classList.contains( 'slide-opened' ) ) {
 		e = e || window.event;
+
 		if ( e.keyCode == 27 ) {
 			generateOffside.close();
+
 			var body = document.body;
 
+			// Focus our slideout toggle.
 			if ( window.document.documentElement.clientWidth <= 768 ) {
 				if ( body.classList.contains( 'slideout-mobile' ) || body.classList.contains( 'slideout-both' ) ) {
-					document.querySelector( '.main-navigation .menu-toggle' ).focus();
+					document.querySelectorAll( '.main-navigation:not(.slideout-navigation)' ).forEach( function( navigation ) {
+						if ( navigation && navigation.style.display !== 'none' ) {
+							navigation.querySelector( '.menu-toggle' ).focus();
+						}
+					} );
 				}
 			} else {
 				if ( body.classList.contains( 'slideout-desktop' ) || body.classList.contains( 'slideout-both' ) ) {
-					document.querySelector( '.slideout-toggle a' ).focus();
-					document.activeElement.blur();
+					document.querySelectorAll( '.main-navigation:not(.slideout-navigation)' ).forEach( function( navigation ) {
+						if ( navigation && navigation.style.display !== 'none' ) {
+							navigation.querySelector( '.slideout-toggle a' ).focus();
+						}
+					} );
 				}
 			}
 		}
 	}
 } );
+
+var toggles = document.querySelectorAll( '.slideout-toggle a' );
+for ( var i = 0; i < toggles.length; i++ ) {
+	toggles[ i ].addEventListener( 'keypress', function( e ) {
+		if ( ' ' === e.key ) {
+			e.preventDefault();
+			generateOffside.open();
+		}
+	} );
+};

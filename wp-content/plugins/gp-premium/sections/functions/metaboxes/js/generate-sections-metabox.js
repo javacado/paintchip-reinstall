@@ -735,7 +735,7 @@ var Generate_Sections = {
     /* Execute the above methods in the Generate_Sections object.
     /*-----------------------------------------------------------------------------------*/
 
-    jQuery(document).ready(function($) {
+	jQuery( function( $ ) {
 
         Generate_Sections.initApplication();
 

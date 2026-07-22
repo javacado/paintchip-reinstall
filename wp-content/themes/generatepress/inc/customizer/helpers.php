@@ -112,6 +112,34 @@ if ( ! function_exists( 'generate_sanitize_decimal_integer' ) ) {
 }
 
 /**
+ * Sanitize integers that can use decimals.
+ *
+ * @since 3.1.0
+ * @param string $input The value to check.
+ */
+function generate_sanitize_empty_decimal_integer( $input ) {
+	if ( '' === $input ) {
+		return '';
+	}
+
+	return abs( floatval( $input ) );
+}
+
+/**
+ * Sanitize integers that can use negative decimals.
+ *
+ * @since 3.1.0
+ * @param string $input The value to check.
+ */
+function generate_sanitize_empty_negative_decimal_integer( $input ) {
+	if ( '' === $input ) {
+		return '';
+	}
+
+	return floatval( $input );
+}
+
+/**
  * Sanitize a positive number, but allow an empty value.
  *
  * @since 2.2
@@ -178,6 +206,27 @@ if ( ! function_exists( 'generate_sanitize_hex_color' ) ) {
 		// 3 or 6 hex digits, or the empty string.
 		if ( preg_match( '|^#([A-Fa-f0-9]{3}){1,2}$|', $color ) ) {
 			return $color;
+		}
+
+		// Sanitize CSS variables.
+		if ( strpos( $color, 'var(' ) !== false ) {
+			return sanitize_text_field( $color );
+		}
+
+		// Sanitize rgb() values.
+		if ( strpos( $color, 'rgb(' ) !== false ) {
+			$color = str_replace( ' ', '', $color );
+
+			sscanf( $color, 'rgb(%d,%d,%d)', $red, $green, $blue );
+			return 'rgb(' . $red . ',' . $green . ',' . $blue . ')';
+		}
+
+		// Sanitize rgba() values.
+		if ( strpos( $color, 'rgba' ) !== false ) {
+			$color = str_replace( ' ', '', $color );
+			sscanf( $color, 'rgba(%d,%d,%d,%f)', $red, $green, $blue, $alpha );
+
+			return 'rgba(' . $red . ',' . $green . ',' . $blue . ',' . $alpha . ')';
 		}
 
 		return '';
@@ -275,6 +324,80 @@ function generate_do_control_inline_scripts() {
 	wp_localize_script( 'generatepress-customizer-controls', 'generatepress_color_defaults', generate_get_color_defaults() );
 	wp_localize_script( 'generatepress-customizer-controls', 'generatepress_typography_defaults', generate_get_default_fonts() );
 	wp_localize_script( 'generatepress-customizer-controls', 'generatepress_spacing_defaults', generate_spacing_get_defaults() );
+
+	wp_localize_script(
+		'generatepress-customizer-controls',
+		'generatepressCustomizeControls',
+		array(
+			'mappedTypographyData' => array(
+				'typography' => GeneratePress_Typography_Migration::get_mapped_typography_data(),
+				'fonts' => GeneratePress_Typography_Migration::get_mapped_font_data(),
+			),
+		)
+	);
+
+	wp_enqueue_script(
+		'generate-customizer-controls',
+		trailingslashit( get_template_directory_uri() ) . 'assets/dist/customizer.js',
+		// We're including wp-color-picker for localized strings, nothing more.
+		array( 'lodash', 'react', 'react-dom', 'wp-components', 'wp-element', 'wp-hooks', 'wp-i18n', 'wp-polyfill', 'jquery', 'customize-base', 'customize-controls', 'wp-color-picker' ),
+		GENERATE_VERSION,
+		true
+	);
+
+	if ( function_exists( 'wp_set_script_translations' ) ) {
+		wp_set_script_translations( 'generate-customizer-controls', 'generatepress' );
+	}
+
+	$color_palette = get_theme_support( 'editor-color-palette' );
+	$colors = array();
+
+	if ( is_array( $color_palette ) ) {
+		foreach ( $color_palette as $key => $value ) {
+			foreach ( $value as $color ) {
+				$colors[] = array(
+					'name' => $color['name'],
+					'color' => $color['color'],
+				);
+			}
+		}
+	}
+
+	wp_localize_script(
+		'generate-customizer-controls',
+		'generateCustomizerControls',
+		array(
+			'palette' => $colors,
+			'showGoogleFonts' => apply_filters( 'generate_font_manager_show_google_fonts', true ),
+			'colorPickerShouldShift' => function_exists( 'did_filter' ),
+			'gpFontLibrary' => class_exists( 'GeneratePress_Pro_Font_Library' )
+				? GeneratePress_Pro_Font_Library::get_fonts()
+				: array(),
+			'gpFontLibraryURI' => class_exists( 'GeneratePress_Pro_Font_Library' )
+				? GeneratePress_Pro_Font_Library::get_font_library_uri()
+				: '',
+		)
+	);
+
+	wp_enqueue_style(
+		'generate-customizer-controls',
+		trailingslashit( get_template_directory_uri() ) . 'assets/dist/style-customizer.css',
+		array( 'wp-components' ),
+		GENERATE_VERSION
+	);
+
+	$global_colors = generate_get_global_colors();
+	$global_colors_css = ':root {';
+
+	if ( ! empty( $global_colors ) ) {
+		foreach ( (array) $global_colors as $key => $data ) {
+			$global_colors_css .= '--' . $data['slug'] . ':' . $data['color'] . ';';
+		}
+	}
+
+	$global_colors_css .= '}';
+
+	wp_add_inline_style( 'generate-customizer-controls', $global_colors_css );
 }
 
 if ( ! function_exists( 'generate_customizer_live_preview' ) ) {
@@ -297,7 +420,7 @@ if ( ! function_exists( 'generate_customizer_live_preview' ) ) {
 			'generatepress_live_preview',
 			array(
 				'mobile' => generate_get_media_query( 'mobile' ),
-				'tablet' => generate_get_media_query( 'tablet' ),
+				'tablet' => generate_get_media_query( 'tablet_only' ),
 				'desktop' => generate_get_media_query( 'desktop' ),
 				'contentLeft' => absint( $spacing_settings['content_left'] ),
 				'contentRight' => absint( $spacing_settings['content_right'] ),
@@ -305,6 +428,17 @@ if ( ! function_exists( 'generate_customizer_live_preview' ) ) {
 				'isRTL' => is_rtl(),
 			)
 		);
+
+		wp_enqueue_script(
+			'generate-postMessage',
+			trailingslashit( get_template_directory_uri() ) . 'inc/customizer/controls/js/postMessage.js',
+			array( 'jquery', 'customize-preview', 'wp-hooks' ),
+			GENERATE_VERSION,
+			true
+		);
+
+		global $generate_customize_fields;
+		wp_localize_script( 'generate-postMessage', 'gpPostMessageFields', $generate_customize_fields );
 	}
 }
 

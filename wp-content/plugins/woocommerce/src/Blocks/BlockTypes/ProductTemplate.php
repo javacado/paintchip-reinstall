@@ -78,7 +78,13 @@ class ProductTemplate extends AbstractBlock {
 
 		$classnames .= ' wc-block-product-template';
 
-		$wrapper_attributes = get_block_wrapper_attributes( array( 'class' => trim( $classnames ) ) );
+		$wrapper_attributes = get_block_wrapper_attributes(
+			array(
+				'class'              => trim( $classnames ),
+				'data-wp-on--scroll' => 'actions.watchScroll',
+				'data-wp-init'       => 'callbacks.initResizeObserver',
+			)
+		);
 
 		$content = '';
 		while ( $query->have_posts() ) {
@@ -188,6 +194,6 @@ class ProductTemplate extends AbstractBlock {
 		if ( ! empty( $metadata['name'] ) && 'woocommerce/product-template' === $metadata['name'] ) {
 			$settings['skip_inner_blocks'] = true;
 		}
-			return $settings;
+		return $settings;
 	}
 }

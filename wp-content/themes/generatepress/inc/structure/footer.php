@@ -17,18 +17,9 @@ if ( ! function_exists( 'generate_construct_footer' ) ) {
 	 * @since 1.3.42
 	 */
 	function generate_construct_footer() {
-		$inside_site_info_class = '';
-
-		if ( 'full-width' !== generate_get_option( 'footer_inner_width' ) ) {
-			$inside_site_info_class = ' grid-container grid-parent';
-
-			if ( generate_is_using_flexbox() ) {
-				$inside_site_info_class = ' grid-container';
-			}
-		}
 		?>
-		<footer <?php generate_do_element_classes( 'site-info', 'site-info' ); ?>>
-			<div class="inside-site-info<?php echo $inside_site_info_class; // phpcs:ignore ?>">
+		<footer <?php generate_do_attr( 'site-info' ); ?>>
+			<div <?php generate_do_attr( 'inside-site-info' ); ?>>
 				<?php
 				/**
 				 * generate_before_copyright hook.
@@ -173,7 +164,7 @@ if ( ! function_exists( 'generate_construct_footer_widgets' ) ) {
 			}
 			?>
 			<div id="footer-widgets" class="site footer-widgets">
-				<div <?php generate_do_element_classes( 'inside_footer' ); ?>>
+				<div <?php generate_do_attr( 'footer-widgets-container' ); ?>>
 					<div class="inside-footer-widgets">
 						<?php
 						if ( $widgets >= 1 ) {
@@ -231,7 +222,7 @@ if ( ! function_exists( 'generate_back_to_top' ) ) {
 		echo apply_filters( // phpcs:ignore
 			'generate_back_to_top_output',
 			sprintf(
-				'<a title="%1$s" aria-label="%1$s" rel="nofollow" href="#" class="generate-back-to-top" style="opacity:0;visibility:hidden;" data-scroll-speed="%2$s" data-start-scroll="%3$s">
+				'<a title="%1$s" aria-label="%1$s" rel="nofollow" href="#" class="generate-back-to-top" data-scroll-speed="%2$s" data-start-scroll="%3$s" role="button">
 					%5$s
 				</a>',
 				esc_attr__( 'Scroll back to top', 'generatepress' ),

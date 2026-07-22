@@ -5,30 +5,103 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 	add_action( 'customize_register', 'generate_blog_customize_register', 99 );
 
 	function generate_blog_customize_register( $wp_customize ) {
-		// Get our defaults
+		// Get our defaults.
 		$defaults = generate_blog_get_defaults();
 
-		// Get our controls
+		// Get our controls.
 		require_once GP_LIBRARY_DIRECTORY . 'customizer-helpers.php';
 
-		// Add control types so controls can be built using JS
+		// Add control types so controls can be built using JS.
 		if ( method_exists( $wp_customize, 'register_control_type' ) ) {
 			$wp_customize->register_control_type( 'GeneratePress_Title_Customize_Control' );
 		}
 
-		// Remove our blog control from the free theme
+		// Remove our blog control from the free theme.
 		if ( $wp_customize->get_control( 'blog_content_control' ) ) {
 			$wp_customize->remove_control( 'blog_content_control' );
 		}
 
-		// Register our custom controls
-		if ( method_exists( $wp_customize,'register_control_type' ) ) {
+		// Register our custom controls.
+		if ( method_exists( $wp_customize, 'register_control_type' ) ) {
 			$wp_customize->register_control_type( 'GeneratePress_Refresh_Button_Customize_Control' );
 			$wp_customize->register_control_type( 'GeneratePress_Information_Customize_Control' );
 			$wp_customize->register_control_type( 'Generate_Control_Toggle_Customize_Control' );
 		}
 
-		// Blog content section
+		$wp_customize->add_section(
+			'generate_blog_loop_template_section',
+			array(
+				'title' => __( 'Blog', 'gp-premium' ),
+				'capability' => 'edit_theme_options',
+				'panel' => 'generate_layout_panel',
+				'priority' => 40,
+				'active_callback' => function() {
+					return generate_has_active_element( 'loop-template', true );
+				},
+			)
+		);
+
+		$wp_customize->add_control(
+			new GeneratePress_Information_Customize_Control(
+				$wp_customize,
+				'generate_using_loop_template',
+				array(
+					'section'     => 'generate_blog_loop_template_section',
+					'description' => sprintf(
+						/* translators: URL to the Elements dashboard. */
+						__( 'This page is using a <a href="%s">Loop Template Element</a>. Other options can be found within that Element.', 'gp-premium' ),
+						admin_url( 'edit.php?post_type=gp_elements' )
+					),
+					'notice' => true,
+					'settings' => ( isset( $wp_customize->selective_refresh ) ) ? array() : 'blogname',
+					'active_callback' => function() {
+						return generate_has_active_element( 'loop-template', true );
+					},
+					'priority' => 0,
+				)
+			)
+		);
+
+		$wp_customize->add_setting(
+			'generate_blog_settings[excerpt_length]', array(
+				'default' => $defaults['excerpt_length'],
+				'capability' => 'edit_theme_options',
+				'type' => 'option',
+				'sanitize_callback' => 'absint',
+			)
+		);
+
+		$wp_customize->add_control(
+			'generate_loop_template_excerpt_length',
+			array(
+				'type' => 'number',
+				'label' => __( 'Excerpt word count', 'gp-premium' ),
+				'section' => 'generate_blog_loop_template_section',
+				'settings' => 'generate_blog_settings[excerpt_length]',
+			)
+		);
+
+		$wp_customize->add_setting(
+			'generate_blog_settings[read_more]',
+			array(
+				'default' => $defaults['read_more'],
+				'capability' => 'edit_theme_options',
+				'type' => 'option',
+				'sanitize_callback' => 'wp_kses_post',
+			)
+		);
+
+		$wp_customize->add_control(
+			'generate_loop_template_read_more',
+			array(
+				'type' => 'text',
+				'label' => __( 'Read more label', 'gp-premium' ),
+				'section' => 'generate_blog_loop_template_section',
+				'settings' => 'generate_blog_settings[read_more]',
+			)
+		);
+
+		// Blog content section.
 		$wp_customize->add_section(
 			'generate_blog_section',
 			array(
@@ -36,6 +109,9 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 				'capability' => 'edit_theme_options',
 				'panel' => 'generate_layout_panel',
 				'priority' => 40,
+				'active_callback' => function() {
+					return ! generate_has_active_element( 'loop-template', true );
+				},
 			)
 		);
 
@@ -48,7 +124,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 					'type' => 'generatepress-customizer-title',
 					'title' => __( 'Content', 'gp-premium' ),
 					'settings' => ( isset( $wp_customize->selective_refresh ) ) ? array() : 'blogname',
-					'priority' => 0,
+					'priority' => 1,
 				)
 			)
 		);
@@ -64,7 +140,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 						'post-meta-single' => __( 'Single', 'gp-premium' ),
 					),
 					'settings' => ( isset( $wp_customize->selective_refresh ) ) ? array() : 'blogname',
-					'priority' => 0,
+					'priority' => 1,
 				)
 			)
 		);
@@ -83,16 +159,6 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 			)
 		);
 
-		// Excerpt length
-		$wp_customize->add_setting(
-			'generate_blog_settings[excerpt_length]', array(
-				'default' => $defaults['excerpt_length'],
-				'capability' => 'edit_theme_options',
-				'type' => 'option',
-				'sanitize_callback' => 'absint',
-			)
-		);
-
 		$wp_customize->add_control(
 			'generate_blog_settings[excerpt_length]', array(
 				'type' => 'number',
@@ -100,16 +166,6 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 				'section' => 'generate_blog_section',
 				'settings' => 'generate_blog_settings[excerpt_length]',
 				'active_callback' => 'generate_premium_is_excerpt',
-			)
-		);
-
-		// Read more text
-		$wp_customize->add_setting(
-			'generate_blog_settings[read_more]', array(
-				'default' => $defaults['read_more'],
-				'capability' => 'edit_theme_options',
-				'type' => 'option',
-				'sanitize_callback' => 'wp_kses_post',
 			)
 		);
 
@@ -122,7 +178,6 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 			)
 		);
 
-		// Read more button
 		$wp_customize->add_setting(
 			'generate_blog_settings[read_more_button]',
 			array(
@@ -729,7 +784,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 				'section' => 'generate_blog_section',
 				'choices' => generate_blog_get_image_sizes(),
 				'settings' => 'generate_blog_settings[single_post_image_size]',
-				'active_callback' => 'generate_premium_featured_image_active',
+				'active_callback' => 'generate_premium_single_featured_image_active',
 			)
 		);
 
@@ -750,7 +805,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 				'label' => __( 'Width', 'gp-premium' ),
 				'section' => 'generate_blog_section',
 				'settings' => 'generate_blog_settings[single_post_image_width]',
-				'active_callback' => 'generate_premium_featured_image_active',
+				'active_callback' => 'generate_premium_single_featured_image_active',
 			)
 		);
 
@@ -771,7 +826,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 				'label' => __( 'Height', 'gp-premium' ),
 				'section' => 'generate_blog_section',
 				'settings' => 'generate_blog_settings[single_post_image_height]',
-				'active_callback' => 'generate_premium_featured_image_active',
+				'active_callback' => 'generate_premium_single_featured_image_active',
 			)
 		);
 
@@ -786,7 +841,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 						'<a href="https://docs.generatepress.com/article/adjusting-the-featured-images/" target="_blank" rel="noopener noreferrer">' . __( 'here', 'gp-premium' ) . '</a>'
 					),
 					'settings' => ( isset( $wp_customize->selective_refresh ) ) ? array() : 'blogname',
-					'active_callback' => 'generate_premium_featured_image_active',
+					'active_callback' => 'generate_premium_single_featured_image_active',
 				)
 			)
 		);
@@ -904,7 +959,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 				'section' => 'generate_blog_section',
 				'choices' => generate_blog_get_image_sizes(),
 				'settings' => 'generate_blog_settings[page_post_image_size]',
-				'active_callback' => 'generate_premium_featured_image_active',
+				'active_callback' => 'generate_premium_single_page_featured_image_active',
 			)
 		);
 
@@ -925,7 +980,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 				'label' => __( 'Width', 'gp-premium' ),
 				'section' => 'generate_blog_section',
 				'settings' => 'generate_blog_settings[page_post_image_width]',
-				'active_callback' => 'generate_premium_featured_image_active',
+				'active_callback' => 'generate_premium_single_page_featured_image_active',
 			)
 		);
 
@@ -946,7 +1001,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 				'label' => __( 'Height', 'gp-premium' ),
 				'section' => 'generate_blog_section',
 				'settings' => 'generate_blog_settings[page_post_image_height]',
-				'active_callback' => 'generate_premium_featured_image_active',
+				'active_callback' => 'generate_premium_single_page_featured_image_active',
 			)
 		);
 
@@ -961,7 +1016,7 @@ if ( ! function_exists( 'generate_blog_customize_register' ) ) {
 						'<a href="https://docs.generatepress.com/article/adjusting-the-featured-images/" target="_blank" rel="noopener noreferrer">' . __( 'here', 'gp-premium' ) . '</a>'
 					),
 					'settings' => ( isset( $wp_customize->selective_refresh ) ) ? array() : 'blogname',
-					'active_callback' => 'generate_premium_featured_image_active',
+					'active_callback' => 'generate_premium_single_page_featured_image_active',
 				)
 			)
 		);
@@ -1118,7 +1173,7 @@ if ( ! function_exists( 'generate_blog_customizer_live_preview' ) ) {
 		wp_enqueue_script(
 			'generate-blog-themecustomizer',
 			trailingslashit( plugin_dir_url( __FILE__ ) ) . 'js/customizer.js',
-			array( 'jquery', 'customize-preview', 'gp-premium' ),
+			array( 'jquery', 'customize-preview', 'generate-blog' ),
 			GENERATE_BLOG_VERSION,
 			true
 		);

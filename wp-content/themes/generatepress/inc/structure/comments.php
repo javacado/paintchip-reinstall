@@ -31,8 +31,8 @@ if ( ! function_exists( 'generate_comment' ) ) {
 		<?php else : ?>
 
 		<li id="comment-<?php comment_ID(); ?>" <?php comment_class( empty( $args['has_children'] ) ? '' : 'parent' ); ?>>
-			<article id="div-comment-<?php comment_ID(); ?>" <?php generate_do_element_classes( 'comment-body', 'comment-body' ); ?>>
-				<footer class="comment-meta">
+			<article <?php generate_do_attr( 'comment-body', array(), array( 'comment-id' => get_comment_ID() ) ); ?>>
+				<footer <?php generate_do_attr( 'comment-meta' ); ?>>
 					<?php
 					if ( 0 != $args['avatar_size'] ) { // phpcs:ignore
 						echo get_avatar( $comment, $args['avatar_size'] );
@@ -43,21 +43,48 @@ if ( ! function_exists( 'generate_comment' ) ) {
 							<?php printf( '<cite itemprop="name" class="fn">%s</cite>', get_comment_author_link() ); ?>
 						</div>
 
-						<div class="entry-meta comment-metadata">
-							<a href="<?php echo esc_url( get_comment_link( $comment->comment_ID ) ); ?>">
-								<time datetime="<?php comment_time( 'c' ); ?>" itemprop="datePublished">
-									<?php
-										printf(
-											/* translators: 1: date, 2: time */
-											_x( '%1$s at %2$s', '1: date, 2: time', 'generatepress' ), // phpcs:ignore
-											get_comment_date(), // phpcs:ignore
-											get_comment_time() // phpcs:ignore
-										);
-									?>
-								</time>
-							</a>
-							<?php edit_comment_link( __( 'Edit', 'generatepress' ), '<span class="edit-link">| ', '</span>' ); ?>
-						</div>
+						<?php
+						/**
+						 * generate_after_comment_author_name hook.
+						 *
+						 * @since 3.1.0
+						 */
+						do_action( 'generate_after_comment_author_name' );
+
+						if ( apply_filters( 'generate_show_comment_entry_meta', true ) ) :
+							$has_comment_date_link = apply_filters( 'generate_add_comment_date_link', true );
+
+							?>
+							<div class="entry-meta comment-metadata">
+								<?php
+								if ( $has_comment_date_link ) {
+									printf(
+										'<a href="%s">',
+										esc_url( get_comment_link( $comment->comment_ID ) )
+									);
+								}
+								?>
+									<time datetime="<?php comment_time( 'c' ); ?>" itemprop="datePublished">
+										<?php
+											printf(
+												/* translators: 1: date, 2: time */
+												_x( '%1$s at %2$s', '1: date, 2: time', 'generatepress' ), // phpcs:ignore
+												get_comment_date(), // phpcs:ignore
+												get_comment_time() // phpcs:ignore
+											);
+										?>
+									</time>
+								<?php
+								if ( $has_comment_date_link ) {
+									echo '</a>';
+								}
+
+								edit_comment_link( __( 'Edit', 'generatepress' ), '<span class="edit-link">| ', '</span>' );
+								?>
+							</div>
+							<?php
+						endif;
+						?>
 					</div>
 
 					<?php if ( '0' == $comment->comment_approved ) : // phpcs:ignore ?>
@@ -125,12 +152,12 @@ add_filter( 'comment_form_defaults', 'generate_set_comment_form_defaults' );
  */
 function generate_set_comment_form_defaults( $defaults ) {
 	$defaults['comment_field'] = sprintf(
-		'<p class="comment-form-comment"><label for="comment" class="screen-reader-text">%1$s</label><textarea id="comment" name="comment" cols="45" rows="8" aria-required="true" required></textarea></p>',
+		'<p class="comment-form-comment"><label for="comment" class="screen-reader-text">%1$s</label><textarea id="comment" name="comment" cols="45" rows="8" required></textarea></p>',
 		esc_html__( 'Comment', 'generatepress' )
 	);
 
-	$defaults['comment_notes_before'] = null;
-	$defaults['comment_notes_after']  = null;
+	$defaults['comment_notes_before'] = '';
+	$defaults['comment_notes_after']  = '';
 	$defaults['id_form']              = 'commentform';
 	$defaults['id_submit']            = 'submit';
 	$defaults['title_reply']          = apply_filters( 'generate_leave_comment', __( 'Leave a Comment', 'generatepress' ) );
@@ -152,17 +179,19 @@ function generate_filter_comment_fields( $fields ) {
 	$required = get_option( 'require_name_email' );
 
 	$fields['author'] = sprintf(
-		'<label for="author" class="screen-reader-text">%1$s</label><input placeholder="%1$s%3$s" id="author" name="author" type="text" value="%2$s" size="30" />',
+		'<label for="author" class="screen-reader-text">%1$s</label><input placeholder="%1$s%3$s" id="author" name="author" type="text" value="%2$s" size="30"%4$s />',
 		esc_html__( 'Name', 'generatepress' ),
 		esc_attr( $commenter['comment_author'] ),
-		$required ? ' *' : ''
+		$required ? ' *' : '',
+		$required ? ' required' : ''
 	);
 
 	$fields['email'] = sprintf(
-		'<label for="email" class="screen-reader-text">%1$s</label><input placeholder="%1$s%3$s" id="email" name="email" type="email" value="%2$s" size="30" />',
+		'<label for="email" class="screen-reader-text">%1$s</label><input placeholder="%1$s%3$s" id="email" name="email" type="email" value="%2$s" size="30"%4$s />',
 		esc_html__( 'Email', 'generatepress' ),
 		esc_attr( $commenter['comment_author_email'] ),
-		$required ? ' *' : ''
+		$required ? ' *' : '',
+		$required ? ' required' : ''
 	);
 
 	$fields['url'] = sprintf(

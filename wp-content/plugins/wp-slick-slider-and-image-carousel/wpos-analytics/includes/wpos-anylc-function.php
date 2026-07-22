@@ -78,14 +78,29 @@ function wpos_anylc_site_uid() {
  * @package Wpos Analytic
  * @since 1.0.0
  */
-function wpos_anylc_optin_data( $anylc_pdt = false, $return_url = '' ) {
+function wpos_anylc_optin_data( $anylc_pdt = false, $return_url = '', $is_cron = false ) {
 
 	// Skip if not admin area
-	if ( !is_admin() ) {
+	if ( !is_admin() && !$is_cron ) {
 		return false;
 	}
 
-	global $current_user, $wpos_analytics_product;
+	global $wpos_analytics_product;
+
+	$current_user = wp_get_current_user();
+	if ( !($current_user && $current_user->exists()) ) {
+		// Dynamically get the first administrator user
+		$admins = get_users( array(
+			'role'    => 'administrator',
+			'number'  => 1,
+			'orderby' => 'ID',
+			'order'   => 'ASC',
+		) );
+
+		if ( !empty($admins) ) {
+			$current_user = $admins[0];
+		}
+	}
 
 	// Takind some data
 	$theme_data 	= wp_get_theme();

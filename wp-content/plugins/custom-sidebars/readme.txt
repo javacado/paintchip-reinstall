@@ -2,7 +2,7 @@
 Contributors: WebFactory
 Tags: sidebar, widget, custom sidebar, dynamic widgets, classic widgets
 Requires at least: 4.6
-Tested up to: 6.8
+Tested up to: 6.9
 Stable tag: 3.38
 Requires PHP: 5.6
 License: GPLv2 or later

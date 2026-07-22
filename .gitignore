@@ -1,3 +1,16 @@
+helper/.phpintel/
+wp-content/uploads/wc-logs/*.log
+helper/assets/*.csv
+helper/assets/archive/
+helper/assets/archive/first-try/css.php
+
+
+/wp-config.php
+/helper/application/config/database.php
+
+# Temporary configuration backups
+*.before-env
+
 /wp-config.php
 /wp-config-sample.php
 /wp-content/plugins/
@@ -6,3 +19,69 @@
 .gitignore
 pma
 
+# Environment and secrets
+.env
+.env.*
+!.env.example
+wp-config.php
+application/config/database.php
+helper/application/config/database.php
+
+# Database dumps and backups
+*.sql
+*.sql.gz
+*.dump
+*.bak
+*.backup
+backup*/
+backups*/
+
+# Logs
+*.log
+wp-content/debug.log
+application/logs/*
+!application/logs/index.html
+helper/application/logs/*
+!helper/application/logs/index.html
+
+# Runtime files and caches
+wp-content/cache/
+wp-content/upgrade/
+wp-content/uploads/cache/
+application/cache/*
+!application/cache/index.html
+helper/application/cache/*
+!helper/application/cache/index.html
+tmp/
+temp/
+
+# Generated archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Dependency directories
+node_modules/
+vendor/
+
+# Package-manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local tooling
+.phpunit.result.cache
+coverage/
+
+# Wordfence runtime logs
+/wp-content/wflogs/

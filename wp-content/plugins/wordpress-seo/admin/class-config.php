@@ -63,7 +63,7 @@ class WPSEO_Admin_Pages {
 				Plans_Page_Integration::PAGE,
 				Redirects_Page_Integration::PAGE,
 			],
-			true
+			true,
 		);
 		$new_dashboard_page = ( $page === General_Page_Integration::PAGE && ! is_network_admin() );
 		if ( $page_exceptions || $new_dashboard_page ) {
@@ -126,7 +126,6 @@ class WPSEO_Admin_Pages {
 		}
 
 		$this->asset_manager->localize_script( 'settings', 'wpseoScriptData', $script_data );
-		$this->asset_manager->enqueue_user_language_script();
 	}
 
 	/**

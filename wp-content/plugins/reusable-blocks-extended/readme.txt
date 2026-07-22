@@ -3,7 +3,7 @@ Contributors: audrasjb, whodunitagency, larrach
 Donate link: https://www.paypal.me/audrasjb
 Tags: Reusable, Blocks, Widget, Shortcode, pattern
 Requires at least: 5.0
-Tested up to: 6.8
+Tested up to: 6.9
 Stable tag: 0.9.1
 Requires PHP: 7.0
 License: GPLv2

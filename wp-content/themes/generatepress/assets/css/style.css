@@ -503,10 +503,7 @@ input {
 	transition: color 0.1s ease-in-out, background-color 0.1s ease-in-out;
 }
 
-a,
-a:visited,
-a:hover,
-a:focus {
+a {
 	text-decoration: none;
 }
 
@@ -570,7 +567,6 @@ a:focus {
 .screen-reader-text {
 	border: 0;
 	clip: rect(1px, 1px, 1px, 1px);
-	-webkit-clip-path: inset(50%);
 	clip-path: inset(50%);
 	height: 1px;
 	margin: -1px;
@@ -586,7 +582,6 @@ a:focus {
 	border-radius: 3px;
 	box-shadow: 0 0 2px 2px rgba(0, 0, 0, 0.6);
 	clip: auto !important;
-	-webkit-clip-path: none;
 	clip-path: none;
 	color: #21759b;
 	display: block;
@@ -754,6 +749,10 @@ a:focus {
 .main-navigation .main-nav ul li.menu-item-has-children > a {
 	padding-right: 0;
 	position: relative;
+}
+
+.main-navigation.sub-menu-left ul ul {
+	box-shadow: -1px 1px 0 rgba(0, 0, 0, 0.1);
 }
 
 .main-navigation.sub-menu-left .sub-menu {
@@ -1192,6 +1191,13 @@ object {
 }
 
 /*--------------------------------------------------------------
+## Post Loop Block
+--------------------------------------------------------------*/
+.wp-block-post-template {
+	margin-left: 0;
+}
+
+/*--------------------------------------------------------------
 # Comments
 --------------------------------------------------------------*/
 .comment-content a {
@@ -1244,6 +1250,10 @@ object {
 .comment-form input,
 .comment-form-comment {
 	margin-bottom: 10px;
+}
+
+.comment-form-comment textarea {
+	resize: vertical;
 }
 
 .comment-form #author,
@@ -1510,8 +1520,7 @@ ol.comment-list {
 	margin-bottom: 20px;
 }
 
-.inside-page-header,
-.wp-block-group__inner-container {
+.inside-page-header {
 	padding: 40px;
 }
 

@@ -32,6 +32,31 @@ if ( ! function_exists( 'generate_base_css' ) ) {
 
 		$css->set_selector( 'a:visited' )->add_property( 'color', $settings['link_color_visited'] );
 
+		$underline_links = generate_get_option( 'underline_links' );
+
+		if ( 'never' !== $underline_links ) {
+			if ( 'always' === $underline_links ) {
+				$css->set_selector( 'a' );
+				$css->add_property( 'text-decoration', 'underline' );
+			}
+
+			if ( 'hover' === $underline_links ) {
+				$css->set_selector( 'a:hover, a:focus' );
+				$css->add_property( 'text-decoration', 'underline' );
+			}
+
+			if ( 'not-hover' === $underline_links ) {
+				$css->set_selector( 'a' );
+				$css->add_property( 'text-decoration', 'underline' );
+
+				$css->set_selector( 'a:hover, a:focus' );
+				$css->add_property( 'text-decoration', 'none' );
+			}
+
+			$css->set_selector( '.entry-title a, .site-branding a, a.button, .wp-block-button__link, .main-navigation a' );
+			$css->add_property( 'text-decoration', 'none' );
+		}
+
 		$css->set_selector( 'a:hover, a:focus, a:active' );
 		$css->add_property( 'color', $settings['link_color_hover'] );
 
@@ -62,13 +87,8 @@ if ( ! function_exists( 'generate_base_css' ) ) {
 
 			$css->start_media_query( $media_query );
 				$css->set_selector( '.inside-header' );
-				$css->add_property( 'display', '-ms-flexbox' );
 				$css->add_property( 'display', 'flex' );
-
-				$css->add_property( '-ms-flex-direction', 'column' );
 				$css->add_property( 'flex-direction', 'column' );
-
-				$css->add_property( '-ms-flex-align', 'center' );
 				$css->add_property( 'align-items', 'center' );
 
 				$css->set_selector( '.site-logo, .site-branding' );
@@ -83,8 +103,6 @@ if ( ! function_exists( 'generate_base_css' ) ) {
 				// phpcs:ignore Generic.WhiteSpace.ScopeIndent.IncorrectExact -- Indented inside media query.
 				if ( 'nav-float-left' === generate_get_option( 'nav_position_setting' ) ) {
 					$css->set_selector( '.nav-float-left .site-logo,.nav-float-left .site-branding,.nav-float-left .header-widget' );
-					$css->add_property( '-webkit-box-ordinal-group', 'initial' );
-					$css->add_property( '-ms-flex-order', 'initial' );
 					$css->add_property( 'order', 'initial' );
 				} // phpcs:ignore Generic.WhiteSpace.ScopeIndent.IncorrectExact -- Indented inside media query.
 			$css->stop_media_query();
@@ -107,6 +125,12 @@ if ( ! function_exists( 'generate_base_css' ) ) {
 			$css->add_property( 'text-align', 'center' );
 			$css->add_property( 'z-index', '10' );
 			$css->add_property( 'transition', 'opacity 300ms ease-in-out' );
+			$css->add_property( 'opacity', '0.1' ); // Can't be 0 or we face double-tap issues on iOS.
+			$css->add_property( 'transform', 'translateY(1000px)' ); // Can't use visibility or we face the same issue as above.
+
+			$css->set_selector( '.generate-back-to-top__show' );
+			$css->add_property( 'opacity', '1' );
+			$css->add_property( 'transform', 'translateY(0)' );
 		}
 
 		if ( 'enable' === generate_get_option( 'nav_search' ) ) {
@@ -180,6 +204,11 @@ if ( ! function_exists( 'generate_base_css' ) ) {
 			$css->add_property( 'left', '0' );
 			$css->add_property( 'top', 'auto' );
 			$css->add_property( 'position', 'relative' );
+			$css->add_property( 'box-shadow', 'none' );
+			$css->add_property( 'border-bottom', '1px solid rgba(0,0,0,0.05)' );
+
+			$css->set_selector( '.dropdown-click .main-navigation ul ul li:last-child > ul.toggled-on' );
+			$css->add_property( 'border-bottom', '0' );
 
 			$css->set_selector( '.dropdown-click .main-navigation ul.toggled-on, .dropdown-click .main-navigation ul li.sfHover > ul.toggled-on' );
 			$css->add_property( 'display', 'block' );
@@ -190,6 +219,7 @@ if ( ! function_exists( 'generate_base_css' ) ) {
 			$css->add_property( 'pointer-events', 'auto' );
 			$css->add_property( 'height', 'auto' );
 			$css->add_property( 'overflow', 'visible' );
+			$css->add_property( 'float', 'none' );
 
 			$css->set_selector( '.dropdown-click .main-navigation.sub-menu-left .sub-menu.toggled-on, .dropdown-click .main-navigation.sub-menu-left ul li.sfHover > ul.toggled-on' );
 			$css->add_property( 'right', '0' );
@@ -215,6 +245,33 @@ if ( ! function_exists( 'generate_base_css' ) ) {
 
 			$css->set_selector( '.dropdown-click .sfHover > a > .dropdown-menu-toggle > .gp-icon svg' );
 			$css->add_property( 'transform', 'rotate(180deg)' );
+
+			if ( 'click' === generate_get_option( 'nav_dropdown_type' ) ) {
+				$css->set_selector( '.menu-item-has-children  .dropdown-menu-toggle[role="presentation"]' );
+				$css->add_property( 'pointer-events', 'none' );
+			}
+		}
+
+		$css->set_selector( ':root' );
+
+		$global_colors = generate_get_global_colors();
+
+		if ( ! empty( $global_colors ) ) {
+			foreach ( (array) $global_colors as $key => $data ) {
+				if ( ! empty( $data['slug'] ) && ! empty( $data['color'] ) ) {
+					$css->add_property( '--' . $data['slug'], $data['color'] );
+				}
+			}
+
+			foreach ( (array) $global_colors as $key => $data ) {
+				if ( ! empty( $data['slug'] ) && ! empty( $data['color'] ) ) {
+					$css->set_selector( ':root .has-' . $data['slug'] . '-color' );
+					$css->add_property( 'color', 'var(--' . $data['slug'] . ')' );
+
+					$css->set_selector( ':root .has-' . $data['slug'] . '-background-color' );
+					$css->add_property( 'background-color', 'var(--' . $data['slug'] . ')' );
+				}
+			}
 		}
 
 		do_action( 'generate_base_css', $css );
@@ -271,10 +328,10 @@ if ( ! function_exists( 'generate_advanced_css' ) ) {
 		$css->set_selector( '.main-navigation,.main-navigation ul ul' );
 		$css->add_property( 'background-color', $settings['navigation_background_color'] );
 
-		$css->set_selector( '.main-navigation .main-nav ul li a,.menu-toggle, .main-navigation .menu-bar-items' );
+		$css->set_selector( '.main-navigation .main-nav ul li a, .main-navigation .menu-toggle, .main-navigation .menu-bar-items' );
 		$css->add_property( 'color', $settings['navigation_text_color'] );
 
-		$css->set_selector( '.main-navigation .main-nav ul li:hover > a,.main-navigation .main-nav ul li:focus > a, .main-navigation .main-nav ul li.sfHover > a, .main-navigation .menu-bar-item:hover > a, .main-navigation .menu-bar-item.sfHover > a' );
+		$css->set_selector( '.main-navigation .main-nav ul li:not([class*="current-menu-"]):hover > a, .main-navigation .main-nav ul li:not([class*="current-menu-"]):focus > a, .main-navigation .main-nav ul li.sfHover:not([class*="current-menu-"]) > a, .main-navigation .menu-bar-item:hover > a, .main-navigation .menu-bar-item.sfHover > a' );
 		$css->add_property( 'color', $settings['navigation_text_hover_color'] );
 		$css->add_property( 'background-color', $settings['navigation_background_hover_color'] );
 
@@ -287,10 +344,6 @@ if ( ! function_exists( 'generate_advanced_css' ) ) {
 		$css->add_property( 'color', $settings['navigation_text_color'] );
 
 		$css->set_selector( '.main-navigation .main-nav ul li[class*="current-menu-"] > a' );
-		$css->add_property( 'color', $settings['navigation_text_current_color'] );
-		$css->add_property( 'background-color', $settings['navigation_background_current_color'] );
-
-		$css->set_selector( '.main-navigation .main-nav ul li[class*="current-menu-"] > a:hover,.main-navigation .main-nav ul li[class*="current-menu-"].sfHover > a' );
 		$css->add_property( 'color', $settings['navigation_text_current_color'] );
 		$css->add_property( 'background-color', $settings['navigation_background_current_color'] );
 
@@ -319,15 +372,11 @@ if ( ! function_exists( 'generate_advanced_css' ) ) {
 		$css->set_selector( '.main-navigation .main-nav ul ul li a' );
 		$css->add_property( 'color', $settings['subnavigation_text_color'] );
 
-		$css->set_selector( '.main-navigation .main-nav ul ul li:hover > a,.main-navigation .main-nav ul ul li:focus > a,.main-navigation .main-nav ul ul li.sfHover > a' );
+		$css->set_selector( '.main-navigation .main-nav ul ul li:not([class*="current-menu-"]):hover > a,.main-navigation .main-nav ul ul li:not([class*="current-menu-"]):focus > a, .main-navigation .main-nav ul ul li.sfHover:not([class*="current-menu-"]) > a' );
 		$css->add_property( 'color', $settings['subnavigation_text_hover_color'] );
 		$css->add_property( 'background-color', $settings['subnavigation_background_hover_color'] );
 
 		$css->set_selector( '.main-navigation .main-nav ul ul li[class*="current-menu-"] > a' );
-		$css->add_property( 'color', $settings['subnavigation_text_current_color'] );
-		$css->add_property( 'background-color', $settings['subnavigation_background_current_color'] );
-
-		$css->set_selector( '.main-navigation .main-nav ul ul li[class*="current-menu-"] > a:hover,.main-navigation .main-nav ul ul li[class*="current-menu-"].sfHover > a' );
 		$css->add_property( 'color', $settings['subnavigation_text_current_color'] );
 		$css->add_property( 'background-color', $settings['subnavigation_background_current_color'] );
 
@@ -442,6 +491,11 @@ if ( ! function_exists( 'generate_advanced_css' ) ) {
 		$css->add_property( 'background-color', $settings['back_to_top_background_color_hover'] );
 		$css->add_property( 'color', $settings['back_to_top_text_color_hover'] );
 
+		$css->set_selector( ':root' );
+		$css->add_property( '--gp-search-modal-bg-color', $settings['search_modal_bg_color'] );
+		$css->add_property( '--gp-search-modal-text-color', $settings['search_modal_text_color'] );
+		$css->add_property( '--gp-search-modal-overlay-bg-color', $settings['search_modal_overlay_bg_color'] );
+
 		$css->start_media_query( generate_get_media_query( 'mobile-menu' ) );
 		$css->set_selector( '.main-navigation .menu-bar-item:hover > a, .main-navigation .menu-bar-item.sfHover > a' );
 		$css->add_property( 'background', 'none' );
@@ -498,8 +552,10 @@ if ( ! function_exists( 'generate_font_css' ) ) {
 		$css->set_selector( 'p' );
 		$css->add_property( 'margin-bottom', floatval( $settings['paragraph_margin'] ), $defaults['paragraph_margin'], 'em' );
 
-		$css->set_selector( '.entry-content > [class*="wp-block-"]:not(:last-child)' );
-		$css->add_property( 'margin-bottom', floatval( $settings['paragraph_margin'] ), false, 'em' );
+		if ( apply_filters( 'generate_do_wp_block_margin_bottom', true ) ) {
+			$css->set_selector( '.entry-content > [class*="wp-block-"]:not(:last-child):not(.wp-block-heading)' );
+			$css->add_property( 'margin-bottom', floatval( $settings['paragraph_margin'] ), false, 'em' );
+		}
 
 		$css->set_selector( '.top-bar' );
 		$css->add_property( 'font-family', $defaults['font_top_bar'] !== $settings['font_top_bar'] ? $top_bar_family : null );
@@ -727,8 +783,13 @@ if ( ! function_exists( 'generate_spacing_css' ) ) {
 			}
 		}
 
-		$css->set_selector( '.separate-containers .inside-article, .separate-containers .comments-area, .separate-containers .page-header, .separate-containers .paging-navigation, .one-container .site-content, .inside-page-header, .wp-block-group__inner-container' );
+		$css->set_selector( '.separate-containers .inside-article, .separate-containers .comments-area, .separate-containers .page-header, .separate-containers .paging-navigation, .one-container .site-content, .inside-page-header' );
 		$css->add_property( 'padding', generate_padding_css( $settings['content_top'], $settings['content_right'], $settings['content_bottom'], $settings['content_left'] ), generate_padding_css( $defaults['content_top'], $defaults['content_right'], $defaults['content_bottom'], $defaults['content_left'] ) );
+
+		if ( apply_filters( 'generate_do_group_inner_container_style', true ) ) {
+			$css->set_selector( '.site-main .wp-block-group__inner-container' );
+			$css->add_property( 'padding', generate_padding_css( $settings['content_top'], $settings['content_right'], $settings['content_bottom'], $settings['content_left'] ) );
+		}
 
 		if ( generate_is_using_flexbox() ) {
 			$css->set_selector( '.separate-containers .paging-navigation' );
@@ -774,7 +835,7 @@ if ( ! function_exists( 'generate_spacing_css' ) ) {
 			$css->set_selector( '.both-right .inside-right-sidebar,.both-left .inside-right-sidebar' );
 			$css->add_property( 'margin-left', absint( $settings['separator'] / 2 ), absint( $defaults['separator'] / 2 ), 'px' );
 
-			$css->set_selector( '.one-container.archive .post:not(:last-child), .one-container.blog .post:not(:last-child)' );
+			$css->set_selector( '.one-container.archive .post:not(:last-child):not(.is-loop-template-item), .one-container.blog .post:not(:last-child):not(.is-loop-template-item)' );
 			$css->add_property( 'padding-bottom', absint( $settings['content_bottom'] ), absint( $defaults['content_bottom'] ), 'px' );
 		} else {
 			$css->set_selector( '.both-right.separate-containers .inside-left-sidebar' );
@@ -875,8 +936,13 @@ if ( ! function_exists( 'generate_spacing_css' ) ) {
 		}
 
 		$css->start_media_query( generate_get_media_query( 'mobile' ) );
-		$css->set_selector( '.separate-containers .inside-article, .separate-containers .comments-area, .separate-containers .page-header, .separate-containers .paging-navigation, .one-container .site-content, .inside-page-header, .wp-block-group__inner-container' );
+		$css->set_selector( '.separate-containers .inside-article, .separate-containers .comments-area, .separate-containers .page-header, .separate-containers .paging-navigation, .one-container .site-content, .inside-page-header' );
 		$css->add_property( 'padding', generate_padding_css( $settings['mobile_content_top'], $settings['mobile_content_right'], $settings['mobile_content_bottom'], $settings['mobile_content_left'] ) );
+
+		if ( apply_filters( 'generate_do_group_inner_container_style', true ) ) {
+			$css->set_selector( '.site-main .wp-block-group__inner-container' );
+			$css->add_property( 'padding', generate_padding_css( $settings['mobile_content_top'], $settings['mobile_content_right'], $settings['mobile_content_bottom'], $settings['mobile_content_left'] ) );
+		}
 
 		$css->set_selector( '.inside-top-bar' );
 
@@ -1151,7 +1217,13 @@ function generate_no_cache_dynamic_css() {
  * @since 3.0.0
  */
 function generate_get_dynamic_css() {
-	$css = generate_base_css() . generate_font_css() . generate_advanced_css() . generate_spacing_css();
+	if ( generate_is_using_dynamic_typography() ) {
+		$typography_css = GeneratePress_Typography::get_css();
+	} else {
+		$typography_css = generate_font_css();
+	}
+
+	$css = generate_base_css() . $typography_css . generate_advanced_css() . generate_spacing_css();
 
 	return apply_filters( 'generate_dynamic_css', $css );
 }
@@ -1193,7 +1265,7 @@ function generate_set_dynamic_css_cache() {
 	$cached_version = get_option( 'generate_dynamic_css_cached_version', '' );
 
 	if ( ! $cached_css || GENERATE_VERSION !== $cached_version ) {
-		$css = generate_base_css() . generate_font_css() . generate_advanced_css() . generate_spacing_css();
+		$css = generate_get_dynamic_css();
 
 		update_option( 'generate_dynamic_css_output', wp_strip_all_tags( $css ) );
 		update_option( 'generate_dynamic_css_cached_version', esc_html( GENERATE_VERSION ) );
@@ -1211,6 +1283,58 @@ function generate_update_dynamic_css_cache() {
 		return;
 	}
 
-	$css = generate_base_css() . generate_font_css() . generate_advanced_css() . generate_spacing_css();
+	$css = generate_get_dynamic_css();
 	update_option( 'generate_dynamic_css_output', wp_strip_all_tags( $css ) );
+}
+
+add_action( 'generate_base_css', 'generate_do_modal_css' );
+/**
+ * Do the modal CSS.
+ *
+ * @param Object $css The existing CSS object.
+ */
+function generate_do_modal_css( $css ) {
+	if ( ! apply_filters( 'generate_enable_modal_script', false ) ) {
+		return;
+	}
+
+	$css->set_selector( '.gp-modal:not(.gp-modal--open):not(.gp-modal--transition)' );
+	$css->add_property( 'display', 'none' );
+
+	$css->set_selector( '.gp-modal--transition:not(.gp-modal--open)' );
+	$css->add_property( 'pointer-events', 'none' );
+
+	$css->set_selector( '.gp-modal-overlay:not(.gp-modal-overlay--open):not(.gp-modal--transition)' );
+	$css->add_property( 'display', 'none' );
+
+	$css->set_selector( '.gp-modal__overlay' );
+	$css->add_property( 'display', 'none' );
+	$css->add_property( 'position', 'fixed' );
+	$css->add_property( 'top', '0' );
+	$css->add_property( 'left', '0' );
+	$css->add_property( 'right', '0' );
+	$css->add_property( 'bottom', '0' );
+	$css->add_property( 'background', 'rgba(0,0,0,0.2)' );
+	$css->add_property( 'display', 'flex' );
+	$css->add_property( 'justify-content', 'center' );
+	$css->add_property( 'align-items', 'center' );
+	$css->add_property( 'z-index', '10000' );
+	$css->add_property( 'backdrop-filter', 'blur(3px)' );
+	$css->add_property( 'transition', 'opacity 500ms ease' );
+	$css->add_property( 'opacity', 0 );
+
+	$css->set_selector( '.gp-modal--open:not(.gp-modal--transition) .gp-modal__overlay' );
+	$css->add_property( 'opacity', 1 );
+
+	$css->set_selector( '.gp-modal__container' );
+	$css->add_property( 'max-width', '100%' );
+	$css->add_property( 'max-height', '100vh' );
+	$css->add_property( 'transform', 'scale(0.9)' );
+	$css->add_property( 'transition', 'transform 500ms ease' );
+	$css->add_property( 'padding', '0 10px' );
+
+	$css->set_selector( '.gp-modal--open:not(.gp-modal--transition) .gp-modal__container' );
+	$css->add_property( 'transform', 'scale(1)' );
+
+	return $css;
 }

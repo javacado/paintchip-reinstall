@@ -28,7 +28,7 @@ class Akismet_REST_API {
 							'required'          => true,
 							'type'              => 'string',
 							'sanitize_callback' => array( 'Akismet_REST_API', 'sanitize_key' ),
-							'description'       => __( 'A 12-character Akismet API key. Available at akismet.com/get/', 'akismet' ),
+							'description'       => __( 'A 12-character Akismet API key. Available at akismet.com/account', 'akismet' ),
 						),
 					),
 				),
@@ -63,6 +63,11 @@ class Akismet_REST_API {
 							'required'    => false,
 							'type'        => 'boolean',
 							'description' => __( 'If true, show the number of approved comments beside each comment author in the comments list page.', 'akismet' ),
+						),
+						'akismet_enable_mcp_access' => array(
+							'required'    => false,
+							'type'        => 'boolean',
+							'description' => __( 'If true, allow MCP clients to access Akismet data and functionality.', 'akismet' ),
 						),
 					),
 				),
@@ -119,7 +124,7 @@ class Akismet_REST_API {
 							'required'          => false,
 							'type'              => 'string',
 							'sanitize_callback' => array( 'Akismet_REST_API', 'sanitize_key' ),
-							'description'       => __( 'A 12-character Akismet API key. Available at akismet.com/get/', 'akismet' ),
+							'description'       => __( 'A 12-character Akismet API key. Available at akismet.com/account', 'akismet' ),
 						),
 					),
 				),
@@ -132,7 +137,7 @@ class Akismet_REST_API {
 							'required'          => false,
 							'type'              => 'string',
 							'sanitize_callback' => array( 'Akismet_REST_API', 'sanitize_key' ),
-							'description'       => __( 'A 12-character Akismet API key. Available at akismet.com/get/', 'akismet' ),
+							'description'       => __( 'A 12-character Akismet API key. Available at akismet.com/account', 'akismet' ),
 						),
 					),
 				),
@@ -145,7 +150,7 @@ class Akismet_REST_API {
 							'required'          => false,
 							'type'              => 'string',
 							'sanitize_callback' => array( 'Akismet_REST_API', 'sanitize_key' ),
-							'description'       => __( 'A 12-character Akismet API key. Available at akismet.com/get/', 'akismet' ),
+							'description'       => __( 'A 12-character Akismet API key. Available at akismet.com/account', 'akismet' ),
 						),
 					),
 				),
@@ -222,6 +227,7 @@ class Akismet_REST_API {
 			array(
 				'akismet_strictness'                  => ( get_option( 'akismet_strictness', '1' ) === '1' ),
 				'akismet_show_user_comments_approved' => ( get_option( 'akismet_show_user_comments_approved', '1' ) === '1' ),
+				'akismet_enable_mcp_access'           => ( get_option( 'akismet_enable_mcp_access', '0' ) === '1' ),
 			)
 		);
 	}
@@ -236,6 +242,7 @@ class Akismet_REST_API {
 		foreach ( array(
 			'akismet_strictness',
 			'akismet_show_user_comments_approved',
+			'akismet_enable_mcp_access',
 		) as $setting_key ) {
 
 			$setting_value = $request->get_param( $setting_key );
@@ -388,7 +395,7 @@ class Akismet_REST_API {
 	public static function remote_call_permission_callback( $request ) {
 		$local_key = Akismet::get_api_key();
 
-		return $local_key && ( strtolower( $request->get_param( 'key' ) ) === strtolower( $local_key ) );
+		return $local_key && ( strtolower( $request->get_param( 'key' ) ?? '' ) === strtolower( $local_key ) );
 	}
 
 	public static function sanitize_interval( $interval, $request, $param ) {
