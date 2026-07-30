@@ -25,6 +25,8 @@ require_once PCI_DIR . 'includes/class-pci-signals.php';
 require_once PCI_DIR . 'includes/class-pci-classifier.php';
 require_once PCI_DIR . 'includes/class-pci-run.php';
 require_once PCI_DIR . 'includes/class-pci-applier.php';
+require_once PCI_DIR . 'includes/class-pci-upc.php';
+require_once PCI_DIR . 'includes/class-pci-sourcing.php';
 require_once PCI_DIR . 'includes/scrapers/interface-pci-scraper.php';
 require_once PCI_DIR . 'includes/scrapers/class-pci-scraper-registry.php';
 require_once PCI_DIR . 'includes/scrapers/class-pci-scraper-sls.php';

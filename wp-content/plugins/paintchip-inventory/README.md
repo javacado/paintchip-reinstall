@@ -179,6 +179,53 @@ add_filter( 'pci_resolved_item', function ( $item, $sku, $rows ) {
 }, 10, 3 );
 ```
 
+## Product sourcing
+
+Three stages. **Nothing runs on a schedule — every stage is started by a person.**
+
+**1. Fetch.** Sourcing screen → *Fetch next 10* or *Keep fetching until done*. Each
+row gets one request to `viewitem.asp?slssku=<sku>`, and the result is parked on
+the staged row as JSON. Responses cache for 24 hours; 0.4s between requests.
+Resumable — re-running only fetches what is still missing. **Creates nothing.**
+
+**2. Preview.** A card per product: image, title, SKU, price, quantity, UPC,
+category match, and where the image came from. Look at ten; if they are right,
+move on.
+
+**3. Create drafts.** Choose how many. Products are created with
+`post_status = draft`, so nothing is visible on the site. Then the review screen
+gives you *Publish*, *Edit* or *Reject* per product, plus *Publish all*.
+Rejected products go to Trash.
+
+### Decisions encoded
+
+- **Price comes from the POS report**, not SLS MSRP. The MSRP is shown on the
+  card for reference. This is a catalog of what the store stocks, so the store's
+  price is the right one.
+- **Titles are sentence case.** SLS shouts; `MOLOTOW ACRYLIC PAINT MARKER 4MM` →
+  `Molotow acrylic paint marker 4mm`. Titles already in mixed case are left
+  alone. `8 X 10` is tidied to `8x10`. Works with or without mbstring.
+- **Categories are matched, never created.** SLS breadcrumbs are compared against
+  existing `product_cat` terms by name, slug, and punctuation-stripped name —
+  the site tree was built from the SLS categories, so most match directly.
+  Anything unmatched is named on the card and the product is left uncategorised.
+- **Images**: the SLS image is used when it is at least 300px wide (configurable).
+  Otherwise Barcode Spider is queried by UPC, exactly as the legacy tool did, and
+  the first image at or above the threshold wins. The card says which source was
+  used. Without a token the fallback is skipped and the card says so.
+- **Provenance is recorded.** Every created product gets `_pci_vend`,
+  `_pci_item_id`, `_pci_source_url` and `_pci_created_run`, so future runs never
+  have to infer where a product came from. `_wpm_gtin_code` gets the UPC.
+- **Existing SKUs are never duplicated** — `wc_get_product_id_by_sku` is checked
+  before creation.
+
+### Coverage
+
+Only SLS (`SS`) has an adapter: 433 of the 1,396 new products. The rest —
+`NO` 369, `LW` 82, `PA` 71, `AD` 61, `BC` 57 and others — have no catalog source
+and will report *No adapter for supplier X*. Add one by implementing
+`PCI_Scraper` and registering it.
+
 ## Still open
 
 - What "hide" should mean — check `woocommerce_hide_out_of_stock_items`.

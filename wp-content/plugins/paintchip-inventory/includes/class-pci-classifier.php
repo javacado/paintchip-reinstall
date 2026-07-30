@@ -21,6 +21,11 @@ class PCI_Classifier {
 	const NEW_P  = 'new';
 	const IGNORE = 'ignore';
 
+	// Sourcing lifecycle for products that did not exist on the site.
+	const CREATED  = 'created_draft';
+	const APPROVED = 'created_published';
+	const REJECTED = 'created_rejected';
+
 	const FLAG_NEGATIVE  = 'flag_negative';
 	const FLAG_AMBIGUOUS = 'flag_ambiguous';
 	const FLAG_NOKEY     = 'flag_nokey';
@@ -31,6 +36,7 @@ class PCI_Classifier {
 	public static function all_actions() {
 		return array(
 			self::UPDATE, self::HIDE, self::REMOVE, self::NEW_P, self::IGNORE,
+			self::CREATED, self::APPROVED, self::REJECTED,
 			self::FLAG_NEGATIVE, self::FLAG_AMBIGUOUS, self::FLAG_NOKEY,
 			self::FLAG_DUPSKU, self::FLAG_REVIEW, self::FLAG_ORPHAN,
 		);
@@ -47,6 +53,9 @@ class PCI_Classifier {
 			self::REMOVE         => __( 'Remove from store', 'pci' ),
 			self::NEW_P          => __( 'New product to add', 'pci' ),
 			self::IGNORE         => __( 'Legacy row, no action', 'pci' ),
+			self::CREATED        => __( 'Draft created, awaiting review', 'pci' ),
+			self::APPROVED       => __( 'Published', 'pci' ),
+			self::REJECTED       => __( 'Rejected and trashed', 'pci' ),
 			self::FLAG_NEGATIVE  => __( 'Flagged: negative quantity', 'pci' ),
 			self::FLAG_AMBIGUOUS => __( 'Flagged: duplicate rows, indistinguishable', 'pci' ),
 			self::FLAG_NOKEY     => __( 'Flagged: no SKU in the report', 'pci' ),

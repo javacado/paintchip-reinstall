@@ -31,8 +31,179 @@ class PCI_Applier {
 		);
 	}
 
+	/** Actions that actually write to a product. */
+	public static function writable_actions() {
+		return array( PCI_Classifier::UPDATE, PCI_Classifier::HIDE, PCI_Classifier::REMOVE );
+	}
+
 	/**
-	 * Apply every actionable item in a run.
+	 * Items still to write for this run.
+	 *
+	 * Resumability lives here: an item is "done" once it has a journal row for
+	 * this run, so a chunk that dies partway can simply be continued. Without
+	 * this a re-run would write every product a second time and — far worse —
+	 * overwrite the before-snapshot with already-applied values, quietly
+	 * destroying the ability to roll back.
+	 */
+	public static function pending_items( $run_id, $limit = 0 ) {
+		global $wpdb;
+		$i = PCI_Schema::table( 'items' );
+		$j = PCI_Schema::table( 'journal' );
+
+		$actions = self::writable_actions();
+		$in      = implode( ',', array_fill( 0, count( $actions ), '%s' ) );
+
+		$args = array_merge( array( (int) $run_id, (int) $run_id ), $actions );
+		$sql  = "SELECT i.* FROM {$i} i
+		         LEFT JOIN {$j} j ON j.run_id = %d AND j.product_id = i.product_id
+		         WHERE i.run_id = %d AND i.action IN ({$in})
+		           AND i.product_id IS NOT NULL AND j.id IS NULL
+		         ORDER BY i.id ASC";
+
+		if ( $limit > 0 ) {
+			$sql   .= ' LIMIT %d';
+			$args[] = (int) $limit;
+		}
+
+		return $wpdb->get_results( $wpdb->prepare( $sql, $args ) );
+	}
+
+	/** @return array{total:int,done:int,pending:int} */
+	public static function progress( $run_id ) {
+		global $wpdb;
+		$i = PCI_Schema::table( 'items' );
+		$j = PCI_Schema::table( 'journal' );
+
+		$actions = self::writable_actions();
+		$in      = implode( ',', array_fill( 0, count( $actions ), '%s' ) );
+
+		$total = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$i} WHERE run_id = %d AND action IN ({$in}) AND product_id IS NOT NULL",
+			array_merge( array( (int) $run_id ), $actions )
+		) );
+
+		$done = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$j} WHERE run_id = %d",
+			(int) $run_id
+		) );
+
+		return array(
+			'total'   => $total,
+			'done'    => $done,
+			'pending' => max( 0, $total - $done ),
+		);
+	}
+
+	/**
+	 * Write one chunk. Safe to call repeatedly; safe to interrupt.
+	 *
+	 * @return array{applied:int,skipped:int,errors:array,total:int,done:int,pending:int,finished:bool}
+	 */
+	public static function apply_chunk( $run_id, $limit = 100, $override_threshold = false ) {
+		global $wpdb;
+
+		$run = PCI_Run::get( $run_id );
+		if ( ! $run ) {
+			return self::chunk_error( $run_id, __( 'That batch no longer exists.', 'pci' ) );
+		}
+
+		if ( ! in_array( $run->status, array( 'parsed', 'applying' ), true ) ) {
+			return self::chunk_error( $run_id, sprintf(
+				__( 'This batch is marked "%s", so it cannot be applied.', 'pci' ),
+				$run->status
+			) );
+		}
+
+		// Threshold is only checked before the first write.
+		$progress = self::progress( $run_id );
+		if ( 0 === $progress['done'] ) {
+			$check = PCI_Run::safety_check( $run_id );
+			if ( $check['blocked'] && ! $override_threshold ) {
+				return self::chunk_error( $run_id, $check['message'] );
+			}
+			PCI_Run::set_status( $run_id, 'applying' );
+		}
+
+		$items   = self::pending_items( $run_id, $limit );
+		$journal = PCI_Schema::table( 'journal' );
+		$applied = 0;
+		$skipped = 0;
+		$errors  = array();
+
+		foreach ( $items as $item ) {
+			$product = wc_get_product( (int) $item->product_id );
+			if ( ! $product ) {
+				$skipped++;
+				$errors[] = sprintf( __( 'SKU %1$s: product %2$d could not be loaded.', 'pci' ), $item->sku, $item->product_id );
+				continue;
+			}
+
+			$before = self::snapshot( $product );
+
+			try {
+				$after = self::apply_one( $product, $item );
+			} catch ( Exception $e ) {
+				$skipped++;
+				$errors[] = sprintf( __( 'SKU %1$s: %2$s', 'pci' ), $item->sku, $e->getMessage() );
+				continue;
+			}
+
+			$wpdb->insert( $journal, array(
+				'run_id'     => (int) $run_id,
+				'product_id' => (int) $item->product_id,
+				'sku'        => $item->sku,
+				'action'     => $item->action,
+				'snapshot'   => wp_json_encode( $before ),
+				'applied'    => wp_json_encode( $after ),
+				'created_at' => current_time( 'mysql' ),
+			) );
+
+			$applied++;
+		}
+
+		$progress = self::progress( $run_id );
+		$finished = ( 0 === $progress['pending'] );
+
+		if ( $finished ) {
+			PCI_Run::set_status( $run_id, 'applied', array(
+				'applied_at' => current_time( 'mysql' ),
+				'applied_by' => get_current_user_id(),
+			) );
+			if ( function_exists( 'wc_delete_product_transients' ) ) {
+				wc_delete_product_transients();
+			}
+		}
+
+		return array(
+			'applied'  => $applied,
+			'skipped'  => $skipped,
+			'errors'   => $errors,
+			'total'    => $progress['total'],
+			'done'     => $progress['done'],
+			'pending'  => $progress['pending'],
+			'finished' => $finished,
+		);
+	}
+
+	private static function chunk_error( $run_id, $message ) {
+		$p = self::progress( $run_id );
+		return array(
+			'applied'  => 0,
+			'skipped'  => 0,
+			'errors'   => array( $message ),
+			'total'    => $p['total'],
+			'done'     => $p['done'],
+			'pending'  => $p['pending'],
+			'finished' => false,
+		);
+	}
+
+	/**
+	 * Apply everything in one request.
+	 *
+	 * Kept for small batches and CLI use. The admin screen drives apply_chunk()
+	 * from the browser instead, because a full run here is thousands of
+	 * product saves and will outlive any sane max_execution_time.
 	 *
 	 * @return array{applied:int,skipped:int,errors:array}
 	 */
@@ -57,74 +228,20 @@ class PCI_Applier {
 			return array( 'applied' => 0, 'skipped' => 0, 'errors' => array( $check['message'] ) );
 		}
 
-		$actions = array( PCI_Classifier::UPDATE, PCI_Classifier::HIDE, PCI_Classifier::REMOVE );
 		$applied = 0;
 		$skipped = 0;
 		$errors  = array();
-		$offset  = 0;
-		$batch   = 200;
-		$journal = PCI_Schema::table( 'journal' );
 
-		while ( true ) {
-			$items = PCI_Run::items( $run_id, $actions, $batch, $offset );
-			if ( empty( $items ) ) {
+		do {
+			$res      = self::apply_chunk( $run_id, 200, $override_threshold );
+			$applied += $res['applied'];
+			$skipped += $res['skipped'];
+			$errors   = array_merge( $errors, $res['errors'] );
+
+			if ( ! empty( $res['errors'] ) && 0 === $res['applied'] ) {
 				break;
 			}
-
-			foreach ( $items as $item ) {
-				if ( empty( $item->product_id ) ) {
-					$skipped++;
-					continue;
-				}
-
-				$product = wc_get_product( (int) $item->product_id );
-				if ( ! $product ) {
-					$skipped++;
-					$errors[] = sprintf( __( 'SKU %s: product %d could not be loaded.', 'pci' ), $item->sku, $item->product_id );
-					continue;
-				}
-
-				$before = self::snapshot( $product );
-
-				try {
-					$after = self::apply_one( $product, $item );
-				} catch ( Exception $e ) {
-					$skipped++;
-					$errors[] = sprintf( __( 'SKU %1$s: %2$s', 'pci' ), $item->sku, $e->getMessage() );
-					continue;
-				}
-
-				$wpdb->insert(
-					$journal,
-					array(
-						'run_id'     => (int) $run_id,
-						'product_id' => (int) $item->product_id,
-						'sku'        => $item->sku,
-						'action'     => $item->action,
-						'snapshot'   => wp_json_encode( $before ),
-						'applied'    => wp_json_encode( $after ),
-						'created_at' => current_time( 'mysql' ),
-					)
-				);
-
-				$applied++;
-			}
-
-			$offset += $batch;
-		}
-
-		PCI_Run::set_status(
-			$run_id,
-			'applied',
-			array(
-				'applied_at' => current_time( 'mysql' ),
-				'applied_by' => get_current_user_id(),
-			)
-		);
-
-		if ( function_exists( 'wc_delete_product_transients' ) ) {
-			wc_delete_product_transients();
-		}
+		} while ( ! $res['finished'] && $res['pending'] > 0 );
 
 		return array( 'applied' => $applied, 'skipped' => $skipped, 'errors' => $errors );
 	}
@@ -199,11 +316,14 @@ class PCI_Applier {
 			return array( 'restored' => 0, 'skipped' => 0, 'errors' => array( __( 'That batch no longer exists.', 'pci' ) ) );
 		}
 
-		if ( 'applied' !== $run->status ) {
+		// 'applying' is a run that died partway. Its journal holds exactly the
+		// products that were written, so rolling it back is both valid and
+		// exactly what you want after a timeout.
+		if ( ! in_array( $run->status, array( 'applied', 'applying' ), true ) ) {
 			return array(
 				'restored' => 0,
 				'skipped'  => 0,
-				'errors'   => array( sprintf( __( 'Only an applied batch can be rolled back. This one is "%s".', 'pci' ), $run->status ) ),
+				'errors'   => array( sprintf( __( 'Only an applied or part-applied batch can be rolled back. This one is "%s".', 'pci' ), $run->status ) ),
 			);
 		}
 
