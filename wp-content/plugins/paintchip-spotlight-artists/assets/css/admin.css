@@ -1,0 +1,58 @@
+.pc-gallery-list,
+.pc-artist-results,
+.pc-artist-selected {
+	list-style: none;
+	margin: 0 0 10px;
+	padding: 0;
+}
+
+.pc-gallery-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.pc-gallery-list li {
+	position: relative;
+	width: 80px;
+}
+
+.pc-gallery-list img {
+	width: 80px;
+	height: 80px;
+	object-fit: cover;
+	display: block;
+	border: 1px solid #ddd;
+}
+
+.pc-gallery-remove,
+.pc-artist-remove {
+	color: #b32d2e;
+	text-decoration: none;
+	font-weight: bold;
+	margin-left: 6px;
+}
+
+.pc-artist-results {
+	border: 1px solid #ddd;
+	max-height: 160px;
+	overflow-y: auto;
+}
+
+.pc-artist-results:empty {
+	border: none;
+}
+
+.pc-artist-result {
+	padding: 6px 8px;
+	cursor: pointer;
+}
+
+.pc-artist-result:hover {
+	background: #f0f0f1;
+}
+
+.pc-artist-selected li {
+	padding: 4px 0;
+	border-bottom: 1px solid #eee;
+}

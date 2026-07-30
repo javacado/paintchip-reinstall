@@ -1,0 +1,42 @@
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+
+
+# --- Handle CodeIgniter for /helper/* ---
+RewriteCond %{REQUEST_URI} ^/helper
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^helper/(.*)$ helper/index.php/$1 [L]
+
+
+
+Redirect 301 /artsupplies.shtml /art-supplies
+Redirect 301 /craftsandgifts.shtml /crafts-gifts
+Redirect 301 /contactus.shtml /contact-us
+Redirect 301 /frames.shtml /frame-shop
+
+#RewriteCond %{HTTPS} off
+#RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+
+# BEGIN WordPress
+# The directives (lines) between "BEGIN WordPress" and "END WordPress" are
+# dynamically generated, and should only be modified via WordPress filters.
+# Any changes to the directives between these markers will be overwritten.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+
+# END WordPress

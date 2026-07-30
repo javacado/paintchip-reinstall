@@ -13,9 +13,9 @@ helper/assets/archive/first-try/css.php
 
 /wp-config.php
 /wp-config-sample.php
-/wp-content/plugins/
-/wp-content/uploads/
-.*
+.DS_Store
+.idea/
+.vscode/
 .gitignore
 pma
 
@@ -71,8 +71,8 @@ Thumbs.db
 *~
 
 # Dependency directories
-node_modules/
-vendor/
+/node_modules/
+/vendor/
 
 # Package-manager logs
 npm-debug.log*
@@ -85,3 +85,6 @@ coverage/
 
 # Wordfence runtime logs
 /wp-content/wflogs/
+
+# Quarantine from the 2026-07 rebuild, archived outside the repo
+/wp-content/plugins-disabled/

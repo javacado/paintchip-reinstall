@@ -1,0 +1,25 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 2,
+	"name": "paintchip/current-spotlight",
+	"title": "Current Spotlight Artist",
+	"category": "widgets",
+	"icon": "art",
+	"description": "Displays the current (or a chosen) month's Spotlight Artist exhibition, matching the classic homepage layout.",
+	"supports": {
+		"html": false
+	},
+	"attributes": {
+		"exhibitionId": {
+			"type": "number",
+			"default": 0
+		},
+		"mode": {
+			"type": "string",
+			"default": "current"
+		}
+	},
+	"textdomain": "paintchip-spotlight",
+	"editorScript": "paintchip-spotlight-block-editor",
+	"render_callback": "paintchip_spotlight_render_block"
+}
