@@ -555,10 +555,81 @@ class PCI_Admin {
 	}
 
 	private function updates_section( $run_id, $counts ) {
-		$items = PCI_Run::items( $run_id, PCI_Classifier::UPDATE, 1000 );
+		global $wpdb;
+		$items_t = PCI_Schema::table( 'items' );
+		$items   = PCI_Run::items( $run_id, PCI_Classifier::UPDATE, 1000 );
+
+		// Price movement across the whole run, not just the first 1,000 shown.
+		$where = $wpdb->prepare(
+			"run_id = %d AND action = %s AND file_price IS NOT NULL
+			 AND cur_price IS NOT NULL AND cur_price <> ''
+			 AND ABS(file_price - cur_price) > 0.005",
+			(int) $run_id,
+			PCI_Classifier::UPDATE
+		);
+
+		$p = $wpdb->get_row(
+			"SELECT COUNT(*) AS n,
+			        SUM(CASE WHEN file_price > cur_price THEN 1 ELSE 0 END) AS up,
+			        SUM(CASE WHEN file_price < cur_price THEN 1 ELSE 0 END) AS down,
+			        SUM(CASE WHEN ABS(file_price - cur_price) > 5 THEN 1 ELSE 0 END) AS big
+			 FROM {$items_t} WHERE {$where}"
+		);
+
+		$movers = $wpdb->get_results(
+			"SELECT sku, product_title, cur_price, file_price,
+			        (file_price - cur_price) AS delta
+			 FROM {$items_t} WHERE {$where}
+			 ORDER BY ABS(file_price - cur_price) DESC LIMIT 10"
+		);
+
+		$writing = PCI_Run::write_prices();
 		?>
 		<div class="pci-section">
 			<h2><?php printf( esc_html__( 'Stock changes (%d)', 'pci' ), (int) $counts[ PCI_Classifier::UPDATE ] ); ?></h2>
+
+			<?php if ( $p && (int) $p->n > 0 ) : ?>
+				<div class="<?php echo $writing ? 'pci-note' : 'pci-note'; ?>">
+					<p>
+						<strong><?php printf( esc_html__( '%d products have a different price in the report', 'pci' ), (int) $p->n ); ?></strong>
+						— <?php printf( esc_html__( '%1$d up, %2$d down, %3$d moving by more than $5.', 'pci' ), (int) $p->up, (int) $p->down, (int) $p->big ); ?>
+						<br>
+						<?php if ( $writing ) : ?>
+							<span style="color:#d63638;"><?php esc_html_e( 'Prices WILL be written to the regular price. Sale prices are left alone and WooCommerce recalculates the effective price.', 'pci' ); ?></span>
+						<?php else : ?>
+							<?php esc_html_e( 'Prices will NOT be written — this is shown for review only. Turn it on under Settings if you want the report to set prices.', 'pci' ); ?>
+						<?php endif; ?>
+					</p>
+					<?php if ( $movers ) : ?>
+						<details class="pci-list">
+							<summary><?php esc_html_e( 'Ten biggest price movements', 'pci' ); ?></summary>
+							<table class="widefat striped" style="max-width:800px;">
+								<thead><tr>
+									<th><?php esc_html_e( 'Product', 'pci' ); ?></th>
+									<th><?php esc_html_e( 'SKU', 'pci' ); ?></th>
+									<th><?php esc_html_e( 'Now', 'pci' ); ?></th>
+									<th><?php esc_html_e( 'Report', 'pci' ); ?></th>
+									<th><?php esc_html_e( 'Change', 'pci' ); ?></th>
+								</tr></thead>
+								<tbody>
+								<?php foreach ( $movers as $m ) : ?>
+									<tr>
+										<td><?php echo esc_html( $m->product_title ); ?></td>
+										<td><code><?php echo esc_html( $m->sku ); ?></code></td>
+										<td><?php echo esc_html( $m->cur_price ); ?></td>
+										<td><?php echo esc_html( $m->file_price ); ?></td>
+										<td style="color:<?php echo ( (float) $m->delta ) > 0 ? '#d63638' : '#00a32a'; ?>;font-weight:600;">
+											<?php echo esc_html( sprintf( '%+.2f', (float) $m->delta ) ); ?>
+										</td>
+									</tr>
+								<?php endforeach; ?>
+								</tbody>
+							</table>
+						</details>
+					<?php endif; ?>
+				</div>
+			<?php endif; ?>
+
 			<details class="pci-list">
 				<summary><?php esc_html_e( 'Show the first 1,000 stock changes', 'pci' ); ?></summary>
 				<div class="pci-scroll">
@@ -568,18 +639,32 @@ class PCI_Admin {
 						<th><?php esc_html_e( 'SKU', 'pci' ); ?></th>
 						<th><?php esc_html_e( 'Stock now', 'pci' ); ?></th>
 						<th><?php esc_html_e( 'Stock after', 'pci' ); ?></th>
+						<th><?php esc_html_e( 'Price now', 'pci' ); ?></th>
+						<th><?php esc_html_e( 'Price in report', 'pci' ); ?></th>
 						<th><?php esc_html_e( 'Managed?', 'pci' ); ?></th>
 						<th><?php esc_html_e( 'Note', 'pci' ); ?></th>
 					</tr></thead>
 					<tbody>
 					<?php foreach ( $items as $it ) :
-						$changed = ( (string) $it->cur_qty !== (string) $it->file_qty );
+						$qty_changed = ( (string) $it->cur_qty !== (string) $it->file_qty );
+						$has_prices  = ( null !== $it->file_price && '' !== (string) $it->cur_price );
+						$delta       = $has_prices ? ( (float) $it->file_price - (float) $it->cur_price ) : 0;
+						$price_moved = $has_prices && abs( $delta ) > 0.005;
 						?>
 						<tr>
 							<td><?php echo esc_html( $it->product_title ); ?></td>
 							<td><code><?php echo esc_html( $it->sku ); ?></code></td>
 							<td><?php echo esc_html( null === $it->cur_qty ? '—' : $it->cur_qty ); ?></td>
-							<td<?php echo $changed ? ' style="font-weight:600;"' : ''; ?>><?php echo (int) $it->file_qty; ?></td>
+							<td<?php echo $qty_changed ? ' style="font-weight:600;"' : ''; ?>><?php echo (int) $it->file_qty; ?></td>
+							<td><?php echo esc_html( '' === (string) $it->cur_price ? '—' : $it->cur_price ); ?></td>
+							<td<?php echo $price_moved ? ' style="font-weight:600;color:' . ( $delta > 0 ? '#d63638' : '#00a32a' ) . ';"' : ''; ?>>
+								<?php
+								echo esc_html( null === $it->file_price ? '—' : $it->file_price );
+								if ( $price_moved ) {
+									echo ' <small>(' . esc_html( sprintf( '%+.2f', $delta ) ) . ')</small>';
+								}
+								?>
+							</td>
 							<td><?php echo 'no' === $it->cur_manage ? '<span style="color:#d63638;">' . esc_html__( 'will switch on', 'pci' ) . '</span>' : esc_html__( 'yes', 'pci' ); ?></td>
 							<td class="pci-muted"><?php echo esc_html( $it->flag_reason ); ?></td>
 						</tr>
