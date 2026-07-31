@@ -195,47 +195,118 @@ class PCI_Sourcing {
 
 	// ----------------------------------------------------------------- fetch
 
+	/**
+	 * Suppliers worth sourcing from right now.
+	 *
+	 * Two conditions, both evaluated live rather than frozen at upload time:
+	 * an adapter must exist, and the supplier must be set Active. So flipping
+	 * a supplier to Ignore takes effect on this queue immediately, with no
+	 * need to re-upload the report.
+	 *
+	 * @return string[]
+	 */
+	public static function sourceable_vends() {
+		$out = array();
+		foreach ( PCI_Scraper_Registry::instance()->supported_codes() as $code ) {
+			if ( PCI_Suppliers::ACTIVE === PCI_Suppliers::policy_for( $code ) ) {
+				$out[] = strtoupper( $code );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * SQL fragment limiting a query to sourceable suppliers.
+	 *
+	 * @return array{sql:string,args:array}|null Null when nothing is sourceable.
+	 */
+	private static function vend_clause() {
+		$vends = self::sourceable_vends();
+		if ( empty( $vends ) ) {
+			return null;
+		}
+		$in = implode( ',', array_fill( 0, count( $vends ), '%s' ) );
+		return array( 'sql' => " AND vend IN ({$in})", 'args' => $vends );
+	}
+
 	/** Rows in this run that still need supplier data. */
 	public static function pending( $run_id, $limit = 0 ) {
 		global $wpdb;
-		$t   = PCI_Schema::table( 'items' );
-		$sql = $wpdb->prepare(
-			"SELECT * FROM {$t}
-			 WHERE run_id = %d AND action = %s AND (raw IS NULL OR raw NOT LIKE %s)
-			 ORDER BY vend, sku",
-			(int) $run_id,
-			PCI_Classifier::NEW_P,
-			'%"scraped"%'
-		);
-		if ( $limit > 0 ) {
-			$sql .= $wpdb->prepare( ' LIMIT %d', (int) $limit );
+
+		$clause = self::vend_clause();
+		if ( null === $clause ) {
+			return array();
 		}
-		return $wpdb->get_results( $sql );
+
+		$t    = PCI_Schema::table( 'items' );
+		$args = array_merge(
+			array( (int) $run_id, PCI_Classifier::NEW_P, '%"scraped"%' ),
+			$clause['args']
+		);
+
+		$sql = "SELECT * FROM {$t}
+		        WHERE run_id = %d AND action = %s AND ( raw IS NULL OR raw NOT LIKE %s )"
+		     . $clause['sql'] . ' ORDER BY vend, sku';
+
+		if ( $limit > 0 ) {
+			$sql   .= ' LIMIT %d';
+			$args[] = (int) $limit;
+		}
+
+		return $wpdb->get_results( $wpdb->prepare( $sql, $args ) );
 	}
 
 	public static function counts( $run_id ) {
 		global $wpdb;
 		$t = PCI_Schema::table( 'items' );
 
-		$total = (int) $wpdb->get_var( $wpdb->prepare(
+		$all_new = (int) $wpdb->get_var( $wpdb->prepare(
 			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s",
-			(int) $run_id, PCI_Classifier::NEW_P
+			(int) $run_id,
+			PCI_Classifier::NEW_P
 		) );
-		$done = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s AND raw LIKE %s",
-			(int) $run_id, PCI_Classifier::NEW_P, '%"scraped"%'
-		) );
-		$failed = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s AND raw LIKE %s",
-			(int) $run_id, PCI_Classifier::NEW_P, '%scrape_error%'
-		) );
+
 		$drafts = (int) $wpdb->get_var( $wpdb->prepare(
 			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s",
-			(int) $run_id, PCI_Classifier::CREATED
+			(int) $run_id,
+			PCI_Classifier::CREATED
 		) );
+
 		$published = (int) $wpdb->get_var( $wpdb->prepare(
 			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s",
-			(int) $run_id, PCI_Classifier::APPROVED
+			(int) $run_id,
+			PCI_Classifier::APPROVED
+		) );
+
+		$clause = self::vend_clause();
+		if ( null === $clause ) {
+			return array(
+				'total'        => 0,
+				'fetched'      => 0,
+				'failed'       => 0,
+				'pending'      => 0,
+				'drafts'       => $drafts,
+				'published'    => $published,
+				'all_new'      => $all_new,
+				'out_of_scope' => $all_new,
+			);
+		}
+
+		$base = array( (int) $run_id, PCI_Classifier::NEW_P );
+
+		$total = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s" . $clause['sql'],
+			array_merge( $base, $clause['args'] )
+		) );
+
+		$done = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s AND raw LIKE %s" . $clause['sql'],
+			array_merge( $base, array( '%"scraped"%' ), $clause['args'] )
+		) );
+
+		$failed = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s AND raw LIKE %s" . $clause['sql'],
+			array_merge( $base, array( '%scrape_error%' ), $clause['args'] )
 		) );
 
 		return array(
@@ -250,11 +321,7 @@ class PCI_Sourcing {
 		);
 	}
 
-	/**
-	 * Fetch supplier data for up to $limit rows.
-	 *
-	 * @return array{done:int,failed:int,errors:array}
-	 */
+
 	public static function fetch_batch( $run_id, $limit = null ) {
 		global $wpdb;
 
@@ -335,28 +402,33 @@ class PCI_Sourcing {
 	// ---------------------------------------------------------------- create
 
 	/** Fetched rows that have usable data and no product yet. */
+	/** Fetched rows that have usable data and no product yet. */
 	public static function ready_to_create( $run_id, $limit = 0 ) {
 		global $wpdb;
-		$t   = PCI_Schema::table( 'items' );
-		$sql = $wpdb->prepare(
-			"SELECT * FROM {$t}
-			 WHERE run_id = %d AND action = %s AND raw LIKE %s AND product_id IS NULL
-			 ORDER BY vend, sku",
-			(int) $run_id,
-			PCI_Classifier::NEW_P,
-			'%"scraped":{%'
-		);
-		if ( $limit > 0 ) {
-			$sql .= $wpdb->prepare( ' LIMIT %d', (int) $limit );
+
+		$clause = self::vend_clause();
+		if ( null === $clause ) {
+			return array();
 		}
-		return $wpdb->get_results( $sql );
+
+		$t    = PCI_Schema::table( 'items' );
+		$args = array_merge(
+			array( (int) $run_id, PCI_Classifier::NEW_P, '%"scraped":{%' ),
+			$clause['args']
+		);
+
+		$sql = "SELECT * FROM {$t}
+		        WHERE run_id = %d AND action = %s AND raw LIKE %s AND product_id IS NULL"
+		     . $clause['sql'] . ' ORDER BY vend, sku';
+
+		if ( $limit > 0 ) {
+			$sql   .= ' LIMIT %d';
+			$args[] = (int) $limit;
+		}
+
+		return $wpdb->get_results( $wpdb->prepare( $sql, $args ) );
 	}
 
-	/**
-	 * Create drafts from fetched rows.
-	 *
-	 * @return array{created:int,skipped:int,errors:array}
-	 */
 	public static function create_drafts( $run_id, $limit = 0 ) {
 		global $wpdb;
 
