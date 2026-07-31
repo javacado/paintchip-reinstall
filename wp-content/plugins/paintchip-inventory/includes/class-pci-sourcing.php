@@ -225,6 +225,10 @@ class PCI_Sourcing {
 			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s AND raw LIKE %s",
 			(int) $run_id, PCI_Classifier::NEW_P, '%"scraped"%'
 		) );
+		$failed = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s AND raw LIKE %s",
+			(int) $run_id, PCI_Classifier::NEW_P, '%scrape_error%'
+		) );
 		$drafts = (int) $wpdb->get_var( $wpdb->prepare(
 			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s",
 			(int) $run_id, PCI_Classifier::CREATED
@@ -237,6 +241,7 @@ class PCI_Sourcing {
 		return array(
 			'total'     => $total,
 			'fetched'   => $done,
+			'failed'    => $failed,
 			'pending'   => $total - $done,
 			'drafts'    => $drafts,
 			'published' => $published,
@@ -259,8 +264,10 @@ class PCI_Sourcing {
 		$done   = 0;
 		$failed = 0;
 		$errors = array();
+		$ids    = array();
 
 		foreach ( $rows as $row ) {
+			$ids[] = (int) $row->id;
 			$scraper = $reg->for_vend( $row->vend );
 
 			$raw = json_decode( (string) $row->raw, true );
@@ -320,7 +327,7 @@ class PCI_Sourcing {
 			usleep( 400000 );
 		}
 
-		return array( 'done' => $done, 'failed' => $failed, 'errors' => $errors );
+		return array( 'done' => $done, 'failed' => $failed, 'errors' => $errors, 'ids' => $ids );
 	}
 
 	// ---------------------------------------------------------------- create

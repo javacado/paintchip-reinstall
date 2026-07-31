@@ -77,6 +77,9 @@ class PCI_Admin {
 			.pci-card-body ul { margin: 6px 0 0; font-size: 12px; line-height: 1.7; }
 			.pci-card-body li { margin: 0; }
 			.pci-card-actions { margin: 10px 0 0; display: flex; gap: 6px; }
+			.pci-card-failed { border-left: 4px solid #d63638; background: #fcf9f9; }
+			.pci-card.pci-new { animation: pci-flash 1.2s ease-out; }
+			@keyframes pci-flash { from { background: #f0f6fc; } to { background: #fff; } }
 		</style>
 		<?php
 	}
@@ -889,8 +892,9 @@ class PCI_Admin {
 		<table class="pci-ledger">
 			<tbody>
 				<tr><td><?php esc_html_e( 'New products in this batch', 'pci' ); ?></td><td class="num"><?php echo (int) $c['total']; ?></td></tr>
-				<tr><td><?php esc_html_e( 'Supplier data fetched', 'pci' ); ?></td><td class="num"><?php echo (int) $c['fetched']; ?></td></tr>
-				<tr><td><?php esc_html_e( 'Still to fetch', 'pci' ); ?></td><td class="num"><?php echo (int) $c['pending']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'Supplier data fetched', 'pci' ); ?></td><td class="num pci-stat-fetched"><?php echo (int) $c['fetched']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'Fetches that failed', 'pci' ); ?></td><td class="num"><?php echo (int) $c['failed']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'Still to fetch', 'pci' ); ?></td><td class="num pci-stat-pending"><?php echo (int) $c['pending']; ?></td></tr>
 				<tr><td><?php esc_html_e( 'Drafts created', 'pci' ); ?></td><td class="num"><?php echo (int) $c['drafts']; ?></td></tr>
 				<tr><td><?php esc_html_e( 'Published', 'pci' ); ?></td><td class="num"><?php echo (int) $c['published']; ?></td></tr>
 			</tbody>
@@ -912,15 +916,15 @@ class PCI_Admin {
 			<span id="pci-fetch-status" class="pci-muted"></span>
 		</p>
 
-		<?php if ( ! empty( $rows ) ) : ?>
-			<div class="pci-section">
-				<h2><?php esc_html_e( 'What will be created', 'pci' ); ?></h2>
-				<p class="pci-muted"><?php esc_html_e( 'Showing the most recently fetched first. Check a handful; if they look right, create the drafts.', 'pci' ); ?></p>
-				<div class="pci-cards">
-					<?php foreach ( $rows as $r ) : $this->sourcing_card( $r ); ?><?php endforeach; ?>
-				</div>
+		<div class="pci-section" id="pci-results" <?php echo empty( $rows ) ? 'style="display:none;"' : ''; ?>>
+			<h2><?php esc_html_e( 'What will be created', 'pci' ); ?></h2>
+			<p class="pci-muted"><?php esc_html_e( 'Newest first, appearing as each batch comes back. Red edge means the fetch failed and the reason is on the card.', 'pci' ); ?></p>
+			<div class="pci-cards" id="pci-cards">
+				<?php foreach ( $rows as $r ) : $this->sourcing_card( $r ); ?><?php endforeach; ?>
 			</div>
+		</div>
 
+		<?php if ( true ) : ?>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:1.5em;">
 				<?php wp_nonce_field( 'pci_create_drafts_' . $run_id ); ?>
 				<input type="hidden" name="action" value="pci_create_drafts">
@@ -947,6 +951,22 @@ class PCI_Admin {
 		(function () {
 			var nonce = <?php echo wp_json_encode( wp_create_nonce( 'pci_fetch' ) ); ?>;
 			var status = document.getElementById('pci-fetch-status');
+			var grid = document.getElementById('pci-cards');
+			var wrap = document.getElementById('pci-results');
+			var stop = false;
+
+			function render(cards) {
+				if (!grid || !cards || !cards.length) return;
+				if (wrap) wrap.style.display = 'block';
+				cards.forEach(function (html) {
+					var d = document.createElement('div');
+					d.innerHTML = html.trim();
+					var card = d.firstChild;
+					if (!card) return;
+					card.classList.add('pci-new');
+					grid.insertBefore(card, grid.firstChild);
+				});
+			}
 
 			function run(runId, keepGoing) {
 				var body = new FormData();
@@ -960,16 +980,28 @@ class PCI_Admin {
 					.then(function (res) {
 						if (!res.success) { status.textContent = res.data || 'Failed'; return; }
 						var d = res.data;
-						status.textContent = d.fetched + ' / ' + d.total + ' fetched, ' + d.pending + ' to go';
-						if (keepGoing && d.pending > 0) { return run(runId, true); }
-						if (d.pending === 0) { location.reload(); }
+						render(d.cards);
+						status.textContent = d.fetched + ' / ' + d.total + ' fetched'
+							+ (d.failed ? ', ' + d.failed + ' failed' : '')
+							+ ', ' + d.pending + ' to go';
+						document.querySelectorAll('.pci-stat-fetched').forEach(function (el) { el.textContent = d.fetched; });
+						document.querySelectorAll('.pci-stat-pending').forEach(function (el) { el.textContent = d.pending; });
+						if (d.pending === 0) {
+							status.textContent += ' — done.';
+							return;
+						}
+						if (keepGoing && !stop) { return run(runId, true); }
+					})
+					.catch(function () {
+						status.textContent = <?php echo wp_json_encode( __( 'Request failed. Press the button again to continue.', 'pci' ) ); ?>;
 					});
 			}
 
 			var one = document.getElementById('pci-fetch-batch');
 			var all = document.getElementById('pci-fetch-all');
-			if (one) one.addEventListener('click', function (e) { e.preventDefault(); run(this.dataset.run, false).then(function(){ location.reload(); }); });
-			if (all) all.addEventListener('click', function (e) { e.preventDefault(); run(this.dataset.run, true); });
+			if (one) one.addEventListener('click', function (e) { e.preventDefault(); stop = false; run(this.dataset.run, false); });
+			if (all) all.addEventListener('click', function (e) { e.preventDefault(); stop = false; run(this.dataset.run, true); });
+			window.addEventListener('beforeunload', function () { stop = true; });
 		})();
 		</script>
 		<?php
@@ -980,10 +1012,13 @@ class PCI_Admin {
 		global $wpdb;
 		$t = PCI_Schema::table( 'items' );
 		return $wpdb->get_results( $wpdb->prepare(
-			"SELECT * FROM {$t} WHERE run_id = %d AND action = %s AND raw LIKE %s ORDER BY id DESC LIMIT %d",
+			"SELECT * FROM {$t} WHERE run_id = %d AND action = %s
+			   AND (raw LIKE %s OR raw LIKE %s)
+			 ORDER BY id DESC LIMIT %d",
 			(int) $run_id,
 			$action ? $action : PCI_Classifier::NEW_P,
 			'%"scraped":{%',
+			'%scrape_error%',
 			(int) $limit
 		) );
 	}
@@ -996,7 +1031,7 @@ class PCI_Admin {
 		$img  = isset( $d['image_url'] ) ? $d['image_url'] : '';
 		$src  = isset( $d['image_source'] ) ? $d['image_source'] : '';
 		?>
-		<div class="pci-card">
+		<div class="pci-card<?php echo $err ? ' pci-card-failed' : ''; ?>">
 			<div class="pci-card-img">
 				<?php if ( $img ) : ?>
 					<img src="<?php echo esc_url( $img ); ?>" alt="" loading="lazy">
@@ -1403,13 +1438,32 @@ class PCI_Admin {
 			wp_send_json_error( __( 'You do not have permission to fetch supplier data.', 'pci' ) );
 		}
 
+		@set_time_limit( 120 );
+
 		$run_id = isset( $_POST['run'] ) ? (int) $_POST['run'] : 0;
 		$result = PCI_Sourcing::fetch_batch( $run_id );
 		$counts = PCI_Sourcing::counts( $run_id );
 
+		// Render the rows just processed so they can be shown immediately,
+		// reusing the same card markup as the page rather than rebuilding it
+		// in JavaScript.
+		$cards = array();
+		if ( ! empty( $result['ids'] ) ) {
+			global $wpdb;
+			$t   = PCI_Schema::table( 'items' );
+			$in  = implode( ',', array_map( 'intval', $result['ids'] ) );
+			$rows = $wpdb->get_results( "SELECT * FROM {$t} WHERE id IN ({$in}) ORDER BY FIELD(id,{$in})" );
+			foreach ( $rows as $row ) {
+				ob_start();
+				$this->sourcing_card( $row );
+				$cards[] = ob_get_clean();
+			}
+		}
+
 		wp_send_json_success( array_merge( $counts, array(
-			'done'   => $result['done'],
-			'failed' => $result['failed'],
+			'batch_done'   => $result['done'],
+			'batch_failed' => $result['failed'],
+			'cards'        => $cards,
 		) ) );
 	}
 
