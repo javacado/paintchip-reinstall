@@ -78,6 +78,7 @@ class PCI_Admin {
 			.pci-card-body li { margin: 0; }
 			.pci-card-actions { margin: 10px 0 0; display: flex; gap: 6px; }
 			.pci-card-failed { border-left: 4px solid #d63638; background: #fcf9f9; }
+			.pci-urls { margin-top: 4px !important; padding-top: 4px; border-top: 1px dotted #dcdcde; }
 			.pci-card.pci-new { animation: pci-flash 1.2s ease-out; }
 			@keyframes pci-flash { from { background: #f0f6fc; } to { background: #fff; } }
 		</style>
@@ -1108,6 +1109,24 @@ class PCI_Admin {
 					</li>
 					<?php if ( $err ) : ?>
 						<li style="color:#d63638;"><?php echo esc_html( $err ); ?></li>
+					<?php endif; ?>
+					<?php
+					$try_url    = isset( $raw['scrape_url'] ) ? $raw['scrape_url'] : ( isset( $d['source_url'] ) ? $d['source_url'] : '' );
+					$search_url = isset( $raw['search_url'] ) ? $raw['search_url'] : ( isset( $d['search_url'] ) ? $d['search_url'] : '' );
+					if ( $try_url || $search_url ) :
+						?>
+						<li class="pci-urls">
+							<?php if ( $try_url ) : ?>
+								<a href="<?php echo esc_url( $try_url ); ?>" target="_blank" rel="noopener"><?php esc_html_e( 'page fetched', 'pci' ); ?></a>
+							<?php endif; ?>
+							<?php if ( $search_url ) : ?>
+								<?php echo $try_url ? ' · ' : ''; ?>
+								<a href="<?php echo esc_url( $search_url ); ?>" target="_blank" rel="noopener"><?php esc_html_e( 'search SLS', 'pci' ); ?></a>
+							<?php endif; ?>
+							<?php if ( ! empty( $d['bytes'] ) ) : ?>
+								<span class="pci-muted"> · <?php echo (int) $d['bytes']; ?> bytes</span>
+							<?php endif; ?>
+						</li>
 					<?php endif; ?>
 				</ul>
 

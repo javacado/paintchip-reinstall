@@ -73,6 +73,16 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 		return $body;
 	}
 
+	/** The item-detail URL this adapter will request for a SKU. */
+	public static function item_url( $sku ) {
+		return sprintf( self::ITEM_URL, rawurlencode( trim( (string) $sku ) ) );
+	}
+
+	/** The catalog search URL, useful when the item URL comes back empty. */
+	public static function search_url( $sku ) {
+		return sprintf( self::FIND_URL, rawurlencode( trim( (string) $sku ) ) );
+	}
+
 	/** Build the predictable image URL for a SKU, e.g. MW200630 -> MW/200630.jpg */
 	public static function guess_image_url( $sku ) {
 		$sku = strtoupper( preg_replace( '/[^A-Za-z0-9]/', '', (string) $sku ) );
@@ -90,10 +100,14 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 			return new WP_Error( 'pci_no_sku', __( 'No SKU was supplied.', 'pci' ) );
 		}
 
-		$url  = sprintf( self::ITEM_URL, rawurlencode( $sku ) );
+
+		$url    = self::item_url( $sku );
+		$search = self::search_url( $sku );
+		$ctx    = array( 'url' => $url, 'search_url' => $search );
+
 		$html = $this->get( $url );
 		if ( is_wp_error( $html ) ) {
-			return $html;
+			return new WP_Error( $html->get_error_code(), $html->get_error_message(), $ctx );
 		}
 
 		$text = $this->to_text( $html );
@@ -102,7 +116,8 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 		if ( false === stripos( $text, $sku ) ) {
 			return new WP_Error(
 				'pci_not_found',
-				sprintf( __( 'SLS has no catalog page for SKU %s.', 'pci' ), $sku )
+				sprintf( __( 'SLS returned a page for %s but it did not contain that SKU.', 'pci' ), $sku ),
+				$ctx
 			);
 		}
 
@@ -115,6 +130,8 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 			'image_url'   => '',
 			'categories'  => array(),
 			'source_url'  => $url,
+			'search_url'  => $search,
+			'bytes'       => strlen( $html ),
 		);
 
 		// "SKU: MW200630   MOLOTOW ACRYLIC PAINT MARKER 4MM POP DISPLAY"
@@ -137,7 +154,8 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 		if ( '' === $out['title'] ) {
 			return new WP_Error(
 				'pci_parse',
-				sprintf( __( 'The SLS page for %s loaded but no title could be read. The page layout may have changed — check the adapter selectors.', 'pci' ), $sku )
+				sprintf( __( 'The SLS page for %s loaded but no title could be read. The page layout may have changed — check the adapter selectors.', 'pci' ), $sku ),
+				$ctx
 			);
 		}
 

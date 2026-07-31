@@ -347,6 +347,8 @@ class PCI_Sourcing {
 			if ( ! $scraper ) {
 				$raw['scraped']       = null;
 				$raw['scrape_error']  = sprintf( __( 'No adapter for supplier %s.', 'pci' ), $row->vend );
+				$raw['scrape_url']    = '';
+				$raw['search_url']    = '';
 				$raw['scraped_at']    = current_time( 'mysql' );
 				$wpdb->update( $t, array( 'raw' => wp_json_encode( $raw ) ), array( 'id' => (int) $row->id ) );
 				$failed++;
@@ -356,8 +358,11 @@ class PCI_Sourcing {
 			$data = $scraper->fetch( $row->sku );
 
 			if ( is_wp_error( $data ) ) {
+				$ed = $data->get_error_data();
 				$raw['scraped']      = null;
 				$raw['scrape_error'] = $data->get_error_message();
+				$raw['scrape_url']   = ( is_array( $ed ) && ! empty( $ed['url'] ) ) ? $ed['url'] : '';
+				$raw['search_url']   = ( is_array( $ed ) && ! empty( $ed['search_url'] ) ) ? $ed['search_url'] : '';
 				$raw['scraped_at']   = current_time( 'mysql' );
 				$failed++;
 				$errors[] = $row->sku . ': ' . $data->get_error_message();
@@ -385,6 +390,8 @@ class PCI_Sourcing {
 				$data['cat_missing'] = $cats['unmatched'];
 
 				$raw['scraped']    = $data;
+				$raw['scrape_url'] = isset( $data['source_url'] ) ? $data['source_url'] : '';
+				$raw['search_url'] = isset( $data['search_url'] ) ? $data['search_url'] : '';
 				$raw['scraped_at'] = current_time( 'mysql' );
 				unset( $raw['scrape_error'] );
 				$done++;
