@@ -239,12 +239,14 @@ class PCI_Sourcing {
 		) );
 
 		return array(
-			'total'     => $total,
-			'fetched'   => $done,
-			'failed'    => $failed,
-			'pending'   => $total - $done,
-			'drafts'    => $drafts,
-			'published' => $published,
+			'total'        => $total,
+			'fetched'      => $done,
+			'failed'       => $failed,
+			'pending'      => max( 0, $total - $done ),
+			'drafts'       => $drafts,
+			'published'    => $published,
+			'all_new'      => $all_new,
+			'out_of_scope' => max( 0, $all_new - $total ),
 		);
 	}
 

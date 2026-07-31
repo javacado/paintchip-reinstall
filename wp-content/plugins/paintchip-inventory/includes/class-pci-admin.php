@@ -887,11 +887,35 @@ class PCI_Admin {
 		<div class="pci-note">
 			<p><strong><?php esc_html_e( 'Nothing here runs on its own.', 'pci' ); ?></strong>
 			<?php esc_html_e( 'Fetching pulls supplier data onto the staged rows and creates nothing. You then look at the previews, create drafts, and publish the ones you want.', 'pci' ); ?></p>
+			<?php
+			$vends = PCI_Sourcing::sourceable_vends();
+			$reg   = PCI_Scraper_Registry::instance();
+			$names = array();
+			foreach ( $vends as $v ) {
+				$sc      = $reg->for_vend( $v );
+				$names[] = $sc ? $sc->name() . ' (' . $v . ')' : $v;
+			}
+			?>
+			<p>
+				<?php if ( empty( $names ) ) : ?>
+					<strong style="color:#d63638;"><?php esc_html_e( 'No supplier is currently sourceable.', 'pci' ); ?></strong>
+					<?php esc_html_e( 'A supplier needs both a scraper adapter and an Active policy. Check the Suppliers screen.', 'pci' ); ?>
+				<?php else : ?>
+					<strong><?php esc_html_e( 'In scope:', 'pci' ); ?></strong> <?php echo esc_html( implode( ', ', $names ) ); ?>.
+					<?php if ( ! empty( $c['out_of_scope'] ) ) : ?>
+						<?php printf(
+							esc_html__( '%d other new products are hidden here — their supplier has no adapter, or is set to Ignore or Discontinued.', 'pci' ),
+							(int) $c['out_of_scope']
+						); ?>
+					<?php endif; ?>
+				<?php endif; ?>
+			</p>
 		</div>
 
 		<table class="pci-ledger">
 			<tbody>
-				<tr><td><?php esc_html_e( 'New products in this batch', 'pci' ); ?></td><td class="num"><?php echo (int) $c['total']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'New products in scope', 'pci' ); ?></td><td class="num"><?php echo (int) $c['total']; ?></td></tr>
+				<tr><td class="pci-muted"><?php esc_html_e( 'Out of scope (no adapter or supplier ignored)', 'pci' ); ?></td><td class="num pci-muted"><?php echo (int) $c['out_of_scope']; ?></td></tr>
 				<tr><td><?php esc_html_e( 'Supplier data fetched', 'pci' ); ?></td><td class="num pci-stat-fetched"><?php echo (int) $c['fetched']; ?></td></tr>
 				<tr><td><?php esc_html_e( 'Fetches that failed', 'pci' ); ?></td><td class="num"><?php echo (int) $c['failed']; ?></td></tr>
 				<tr><td><?php esc_html_e( 'Still to fetch', 'pci' ); ?></td><td class="num pci-stat-pending"><?php echo (int) $c['pending']; ?></td></tr>
@@ -1010,10 +1034,15 @@ class PCI_Admin {
 	/** Rows with supplier data attached, newest first. */
 	private function fetched_rows( $run_id, $limit = 200, $action = null ) {
 		global $wpdb;
-		$t = PCI_Schema::table( 'items' );
+		$t     = PCI_Schema::table( 'items' );
+		$vends = PCI_Sourcing::sourceable_vends();
+		if ( empty( $vends ) ) {
+			return array();
+		}
+		$in = "'" . implode( "','", array_map( 'esc_sql', $vends ) ) . "'";
 		return $wpdb->get_results( $wpdb->prepare(
 			"SELECT * FROM {$t} WHERE run_id = %d AND action = %s
-			   AND (raw LIKE %s OR raw LIKE %s)
+			   AND (raw LIKE %s OR raw LIKE %s) AND vend IN ({$in})
 			 ORDER BY id DESC LIMIT %d",
 			(int) $run_id,
 			$action ? $action : PCI_Classifier::NEW_P,
