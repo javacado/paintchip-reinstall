@@ -19,6 +19,7 @@ class PCI_Admin {
 		add_action( 'admin_post_pci_apply', array( $this, 'handle_apply' ) );
 		add_action( 'admin_post_pci_rollback', array( $this, 'handle_rollback' ) );
 		add_action( 'admin_post_pci_settings', array( $this, 'handle_settings' ) );
+		add_action( 'admin_post_pci_portal', array( $this, 'handle_portal' ) );
 		add_action( 'admin_post_pci_export', array( $this, 'handle_export' ) );
 		add_action( 'wp_ajax_pci_scrape', array( $this, 'ajax_scrape' ) );
 		add_action( 'wp_ajax_pci_fetch_batch', array( $this, 'ajax_fetch_batch' ) );
@@ -41,6 +42,7 @@ class PCI_Admin {
 
 		add_submenu_page( self::SLUG, __( 'Batches', 'pci' ), __( 'Batches', 'pci' ), PCI_CAP, self::SLUG, array( $this, 'route' ) );
 		add_submenu_page( self::SLUG, __( 'Suppliers', 'pci' ), __( 'Suppliers', 'pci' ), PCI_CAP, self::SLUG . '-suppliers', array( $this, 'route_suppliers' ) );
+		add_submenu_page( self::SLUG, __( 'Portal setup', 'pci' ), __( 'Portal setup', 'pci' ), PCI_CAP, self::SLUG . '-portal', array( $this, 'route_portal' ) );
 		add_submenu_page( self::SLUG, __( 'Settings', 'pci' ), __( 'Settings', 'pci' ), PCI_CAP, self::SLUG . '-settings', array( $this, 'route_settings' ) );
 	}
 
@@ -1244,6 +1246,237 @@ class PCI_Admin {
 		<?php endif; ?>
 		<?php
 		echo '</div>';
+	}
+
+	// ---------------------------------------------------------- portal screen
+
+	public function route_portal() {
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to view this page.', 'pci' ) );
+		}
+
+		$map     = PCI_Scraper_SLS::portal_map();
+		$creds   = PCI_Http::get_credentials( 'SS' );
+		$enabled = (bool) get_option( PCI_Scraper_SLS::OPT_PORTAL_ENABLED, false );
+		$result  = get_transient( 'pci_portal_result' );
+		delete_transient( 'pci_portal_result' );
+
+		echo '<div class="wrap">';
+		$this->notices();
+		?>
+		<h1><?php esc_html_e( 'SLS portal setup', 'pci' ); ?></h1>
+
+		<div class="pci-note">
+			<p><?php esc_html_e( 'The public SLS site carries only minimal product data. The dealer portal has more, including UPC codes. Point the plugin at the portal here and it will log in, hold the session, and merge the extra fields into what it already gets publicly.', 'pci' ); ?></p>
+			<p><?php esc_html_e( 'Your password is encrypted in the database using this site\'s own security keys. That protects it from a plain database dump, but anyone with access to both the files and the database could still recover it. Use a dedicated portal account if the supplier allows one.', 'pci' ); ?></p>
+		</div>
+
+		<h2><?php esc_html_e( 'Step 1 — inspect the login form', 'pci' ); ?></h2>
+		<p><?php esc_html_e( 'Rather than guessing the field names, the plugin reads the real login page from your server and shows what is on it.', 'pci' ); ?></p>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'pci_portal' ); ?>
+			<input type="hidden" name="action" value="pci_portal">
+			<input type="hidden" name="op" value="detect">
+			<p>
+				<label><?php esc_html_e( 'Login page URL', 'pci' ); ?><br>
+					<input type="url" name="login_url" class="large-text code" value="<?php echo esc_attr( get_option( 'pci_sls_login_url', PCI_Scraper_SLS::PORTAL_LOGIN ) ); ?>">
+				</label>
+			</p>
+			<p><button class="button button-primary"><?php esc_html_e( 'Detect form fields', 'pci' ); ?></button></p>
+		</form>
+
+		<?php if ( is_array( $result ) && 'detect' === $result['op'] ) : ?>
+			<div class="<?php echo empty( $result['ok'] ) ? 'pci-danger' : 'pci-note'; ?>">
+				<p><strong><?php echo esc_html( $result['message'] ); ?></strong></p>
+				<?php if ( ! empty( $result['form'] ) ) : $f = $result['form']; ?>
+					<table class="widefat striped" style="max-width:760px;">
+						<thead><tr><th><?php esc_html_e( 'Field name', 'pci' ); ?></th><th><?php esc_html_e( 'Type', 'pci' ); ?></th><th><?php esc_html_e( 'Default value', 'pci' ); ?></th></tr></thead>
+						<tbody>
+						<?php foreach ( $f['fields'] as $name => $meta ) : ?>
+							<tr>
+								<td><code><?php echo esc_html( $name ); ?></code></td>
+								<td><?php echo esc_html( $meta['type'] ); ?></td>
+								<td class="pci-muted"><?php echo esc_html( $meta['value'] ); ?></td>
+							</tr>
+						<?php endforeach; ?>
+						</tbody>
+					</table>
+					<p class="pci-muted"><?php esc_html_e( 'Posts to:', 'pci' ); ?> <code><?php echo esc_html( $f['action'] ); ?></code> (<?php echo esc_html( strtoupper( $f['method'] ) ); ?>)</p>
+				<?php elseif ( ! empty( $result['excerpt'] ) ) : ?>
+					<p class="pci-muted"><?php echo esc_html( $result['excerpt'] ); ?></p>
+				<?php endif; ?>
+			</div>
+		<?php endif; ?>
+
+		<h2 class="pci-section"><?php esc_html_e( 'Step 2 — credentials and mapping', 'pci' ); ?></h2>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'pci_portal' ); ?>
+			<input type="hidden" name="action" value="pci_portal">
+			<input type="hidden" name="op" value="save">
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Username', 'pci' ); ?></th>
+					<td><input type="text" name="user" class="regular-text" value="<?php echo esc_attr( $creds['user'] ); ?>" autocomplete="off"></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Password', 'pci' ); ?></th>
+					<td>
+						<input type="password" name="pass" class="regular-text" value="" autocomplete="new-password" placeholder="<?php echo $creds['pass'] ? esc_attr__( 'saved — leave blank to keep', 'pci' ) : ''; ?>">
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Form posts to', 'pci' ); ?></th>
+					<td><input type="url" name="map_action" class="large-text code" value="<?php echo esc_attr( $map['action'] ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Username field name', 'pci' ); ?></th>
+					<td><input type="text" name="map_user" class="regular-text code" value="<?php echo esc_attr( $map['user_field'] ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Password field name', 'pci' ); ?></th>
+					<td><input type="text" name="map_pass" class="regular-text code" value="<?php echo esc_attr( $map['pass_field'] ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Item URL pattern', 'pci' ); ?></th>
+					<td>
+						<input type="text" name="item_url" class="large-text code" value="<?php echo esc_attr( get_option( PCI_Scraper_SLS::OPT_PORTAL_ITEMURL, PCI_Scraper_SLS::PORTAL_ITEM ) ); ?>">
+						<p class="description"><?php esc_html_e( 'Use %s where the SKU goes. Find a product in the portal, copy its URL, and replace the SKU with %s.', 'pci' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Use the portal', 'pci' ); ?></th>
+					<td><label><input type="checkbox" name="enabled" value="1" <?php checked( $enabled ); ?>> <?php esc_html_e( 'Merge portal data into fetches', 'pci' ); ?></label></td>
+				</tr>
+			</table>
+			<p><button class="button button-primary"><?php esc_html_e( 'Save portal settings', 'pci' ); ?></button></p>
+		</form>
+
+		<h2 class="pci-section"><?php esc_html_e( 'Step 3 — test', 'pci' ); ?></h2>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'pci_portal' ); ?>
+			<input type="hidden" name="action" value="pci_portal">
+			<input type="hidden" name="op" value="test">
+			<p>
+				<label><?php esc_html_e( 'Test with SKU', 'pci' ); ?>
+					<input type="text" name="sku" class="regular-text code" value="<?php echo esc_attr( isset( $_GET['sku'] ) ? sanitize_text_field( wp_unslash( $_GET['sku'] ) ) : 'ARGLS5' ); ?>">
+				</label>
+				<button class="button button-primary"><?php esc_html_e( 'Log in and fetch', 'pci' ); ?></button>
+			</p>
+		</form>
+
+		<?php if ( is_array( $result ) && 'test' === $result['op'] ) : ?>
+			<div class="<?php echo empty( $result['ok'] ) ? 'pci-danger' : 'pci-note'; ?>">
+				<p><strong><?php echo esc_html( $result['message'] ); ?></strong></p>
+				<?php if ( ! empty( $result['url'] ) ) : ?>
+					<p><?php esc_html_e( 'Fetched:', 'pci' ); ?> <a href="<?php echo esc_url( $result['url'] ); ?>" target="_blank" rel="noopener"><code><?php echo esc_html( $result['url'] ); ?></code></a></p>
+				<?php endif; ?>
+				<?php if ( ! empty( $result['excerpt'] ) ) : ?>
+					<p><strong><?php esc_html_e( 'What came back:', 'pci' ); ?></strong></p>
+					<pre class="pci-scroll" style="padding:10px;white-space:pre-wrap;"><?php echo esc_html( $result['excerpt'] ); ?></pre>
+				<?php endif; ?>
+			</div>
+		<?php endif; ?>
+		<?php
+		echo '</div>';
+	}
+
+	public function handle_portal() {
+		check_admin_referer( 'pci_portal' );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to change these settings.', 'pci' ) );
+		}
+
+		$op  = isset( $_POST['op'] ) ? sanitize_key( $_POST['op'] ) : '';
+		$out = array( 'op' => $op, 'ok' => false, 'message' => '' );
+
+		if ( 'detect' === $op ) {
+			$url = isset( $_POST['login_url'] ) ? esc_url_raw( wp_unslash( $_POST['login_url'] ) ) : '';
+			update_option( 'pci_sls_login_url', $url, false );
+
+			$http = new PCI_Http( 'SS' );
+			$body = $http->get( $url );
+
+			if ( is_wp_error( $body ) ) {
+				$out['message'] = $body->get_error_message();
+			} else {
+				$form = PCI_Http::inspect_form( $body, $url );
+				if ( is_wp_error( $form ) ) {
+					$out['message'] = $form->get_error_message();
+					$out['excerpt'] = PCI_Scraper_SLS::excerpt( $body );
+				} else {
+					$out['ok']      = true;
+					$out['form']    = $form;
+					$out['message'] = sprintf(
+						__( 'Found a form with %d fields. The mapping below has been filled in from it — check it, then save.', 'pci' ),
+						count( $form['fields'] )
+					);
+
+					$extra = array();
+					foreach ( $form['fields'] as $name => $meta ) {
+						if ( in_array( $meta['type'], array( 'hidden', 'submit' ), true ) && '' !== $meta['value'] ) {
+							$extra[ $name ] = $meta['value'];
+						}
+					}
+
+					update_option( PCI_Scraper_SLS::OPT_PORTAL_MAP, array(
+						'action'     => $form['action'],
+						'user_field' => isset( $form['text_fields'][0] ) ? $form['text_fields'][0] : '',
+						'pass_field' => $form['password_field'],
+						'extra'      => $extra,
+					), false );
+				}
+			}
+		} elseif ( 'save' === $op ) {
+			PCI_Http::save_credentials(
+				'SS',
+				isset( $_POST['user'] ) ? sanitize_text_field( wp_unslash( $_POST['user'] ) ) : '',
+				isset( $_POST['pass'] ) ? (string) wp_unslash( $_POST['pass'] ) : ''
+			);
+
+			$map = PCI_Scraper_SLS::portal_map();
+			update_option( PCI_Scraper_SLS::OPT_PORTAL_MAP, array(
+				'action'     => isset( $_POST['map_action'] ) ? esc_url_raw( wp_unslash( $_POST['map_action'] ) ) : '',
+				'user_field' => isset( $_POST['map_user'] ) ? sanitize_text_field( wp_unslash( $_POST['map_user'] ) ) : '',
+				'pass_field' => isset( $_POST['map_pass'] ) ? sanitize_text_field( wp_unslash( $_POST['map_pass'] ) ) : '',
+				'extra'      => isset( $map['extra'] ) ? $map['extra'] : array(),
+			), false );
+
+			update_option( PCI_Scraper_SLS::OPT_PORTAL_ITEMURL, isset( $_POST['item_url'] ) ? sanitize_text_field( wp_unslash( $_POST['item_url'] ) ) : '', false );
+			update_option( PCI_Scraper_SLS::OPT_PORTAL_ENABLED, ! empty( $_POST['enabled'] ) ? 1 : 0, false );
+
+			( new PCI_Http( 'SS' ) )->clear_session();
+
+			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-portal', 'pci_msg' => __( 'Portal settings saved.', 'pci' ) ), admin_url( 'admin.php' ) ) );
+			exit;
+		} elseif ( 'test' === $op ) {
+			$sku     = isset( $_POST['sku'] ) ? sanitize_text_field( wp_unslash( $_POST['sku'] ) ) : '';
+			$scraper = new PCI_Scraper_SLS();
+			$login   = $scraper->portal_login( true );
+
+			if ( is_wp_error( $login ) ) {
+				$out['message'] = $login->get_error_message();
+				$d              = $login->get_error_data();
+				if ( is_array( $d ) && ! empty( $d['excerpt'] ) ) {
+					$out['excerpt'] = $d['excerpt'];
+				}
+			} else {
+				$url  = PCI_Scraper_SLS::portal_item_url( $sku );
+				$body = $scraper->portal_get( $url );
+				$out['url'] = $url;
+
+				if ( is_wp_error( $body ) ) {
+					$out['message'] = __( 'Logged in, but that item could not be fetched: ', 'pci' ) . $body->get_error_message();
+				} else {
+					$out['ok']      = true;
+					$out['message'] = sprintf( __( 'Logged in and fetched %d bytes. Check below that this is the product page and that a UPC is visible.', 'pci' ), strlen( $body ) );
+					$out['excerpt'] = PCI_Scraper_SLS::excerpt( $body, 2000 );
+				}
+			}
+		}
+
+		set_transient( 'pci_portal_result', $out, 60 );
+		wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-portal' ), admin_url( 'admin.php' ) ) );
+		exit;
 	}
 
 	// -------------------------------------------------------- settings screen

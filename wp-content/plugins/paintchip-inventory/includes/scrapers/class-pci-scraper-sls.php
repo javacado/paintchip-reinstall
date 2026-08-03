@@ -28,6 +28,201 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 	const FIND_URL  = 'https://www.slsarts.com/visual_right.asp?txtfind=%s';
 	const CACHE_TTL = DAY_IN_SECONDS;
 
+	// Client portal. The public site carries only minimal data; UPCs and fuller
+	// descriptions live behind the dealer login.
+	const PORTAL_LOGIN = 'https://m.slsarts.com/slsmobile_login.asp';
+	const PORTAL_ITEM  = 'https://m.slsarts.com/slsmobile.asp?slssku=%s';
+
+	const OPT_PORTAL_ENABLED = 'pci_sls_portal_enabled';
+	const OPT_PORTAL_MAP     = 'pci_sls_portal_map';
+	const OPT_PORTAL_ITEMURL = 'pci_sls_portal_itemurl';
+
+	/** @var PCI_Http|null */
+	private $http = null;
+
+	private function http() {
+		if ( null === $this->http ) {
+			$this->http = new PCI_Http( 'SS' );
+		}
+		return $this->http;
+	}
+
+	public static function portal_enabled() {
+		return (bool) get_option( self::OPT_PORTAL_ENABLED, false )
+			&& PCI_Http::has_credentials( 'SS' );
+	}
+
+	/**
+	 * Field mapping discovered by the setup screen.
+	 *
+	 * @return array{action:string,user_field:string,pass_field:string,extra:array}
+	 */
+	public static function portal_map() {
+		$m = get_option( self::OPT_PORTAL_MAP, array() );
+		return wp_parse_args( is_array( $m ) ? $m : array(), array(
+			'action'     => '',
+			'user_field' => '',
+			'pass_field' => '',
+			'extra'      => array(),
+		) );
+	}
+
+	public static function portal_item_url( $sku ) {
+		$tpl = get_option( self::OPT_PORTAL_ITEMURL, self::PORTAL_ITEM );
+		if ( false === strpos( (string) $tpl, '%s' ) ) {
+			$tpl = self::PORTAL_ITEM;
+		}
+		return sprintf( $tpl, rawurlencode( trim( (string) $sku ) ) );
+	}
+
+	/**
+	 * Authenticate against the portal.
+	 *
+	 * @param bool $force Ignore any existing session.
+	 * @return true|WP_Error
+	 */
+	public function portal_login( $force = false ) {
+		$map = self::portal_map();
+		if ( '' === $map['action'] || '' === $map['user_field'] || '' === $map['pass_field'] ) {
+			return new WP_Error( 'pci_portal_unmapped', __( 'The portal login form has not been mapped yet. Run Detect on the Portal setup screen.', 'pci' ) );
+		}
+
+		$creds = PCI_Http::get_credentials( 'SS' );
+		if ( '' === $creds['user'] ) {
+			return new WP_Error( 'pci_portal_nocreds', __( 'No portal credentials are saved.', 'pci' ) );
+		}
+
+		$http = $this->http();
+		if ( $force ) {
+			$http->clear_session();
+		}
+
+		// Load the login page first: ASP hands out its session cookie there, and
+		// posting without it is rejected.
+		$http->get( self::PORTAL_LOGIN );
+
+		$fields = is_array( $map['extra'] ) ? $map['extra'] : array();
+		$fields[ $map['user_field'] ] = $creds['user'];
+		$fields[ $map['pass_field'] ] = $creds['pass'];
+
+		$body = $http->post( $map['action'], $fields );
+		if ( is_wp_error( $body ) ) {
+			return $body;
+		}
+
+		if ( self::looks_logged_out( $body ) ) {
+			return new WP_Error(
+				'pci_portal_denied',
+				__( 'The portal rejected those credentials, or the login form has changed. Re-run Detect and check the username and password.', 'pci' ),
+				array( 'excerpt' => self::excerpt( $body ) )
+			);
+		}
+
+		return true;
+	}
+
+	/** Heuristic: does this response look like a login wall rather than content? */
+	public static function looks_logged_out( $html ) {
+		if ( ! is_string( $html ) || '' === $html ) {
+			return true;
+		}
+		$t = strtolower( wp_strip_all_tags( $html ) );
+		if ( false !== strpos( $t, 'invalid' ) && false !== strpos( $t, 'password' ) ) {
+			return true;
+		}
+		if ( preg_match( '/type\s*=\s*["\']password["\']/i', $html ) ) {
+			return true;
+		}
+		return false;
+	}
+
+	public static function excerpt( $html, $len = 600 ) {
+		$t = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) $html ) ) );
+		return function_exists( 'mb_substr' ) ? mb_substr( $t, 0, $len ) : substr( $t, 0, $len );
+	}
+
+	/**
+	 * Fetch a portal page, logging in once if the session has lapsed.
+	 *
+	 * @return string|WP_Error
+	 */
+	public function portal_get( $url ) {
+		$http = $this->http();
+
+		if ( ! $http->has_session() ) {
+			$ok = $this->portal_login();
+			if ( is_wp_error( $ok ) ) {
+				return $ok;
+			}
+		}
+
+		$body = $http->get( $url );
+		if ( is_wp_error( $body ) ) {
+			return $body;
+		}
+
+		if ( self::looks_logged_out( $body ) ) {
+			$ok = $this->portal_login( true );
+			if ( is_wp_error( $ok ) ) {
+				return $ok;
+			}
+			$body = $http->get( $url );
+			if ( is_wp_error( $body ) ) {
+				return $body;
+			}
+			if ( self::looks_logged_out( $body ) ) {
+				return new WP_Error( 'pci_portal_session', __( 'Logged in, but the portal still returned a login page for that item.', 'pci' ), array( 'url' => $url ) );
+			}
+		}
+
+		return $body;
+	}
+
+	/**
+	 * Pull the extra fields the portal exposes and merge them over the public
+	 * data. The public site stays the base because it reliably yields a title
+	 * and image; the portal fills in UPC and description.
+	 */
+	private function enrich_from_portal( $sku, array $out ) {
+		$url  = self::portal_item_url( $sku );
+		$body = $this->portal_get( $url );
+
+		if ( is_wp_error( $body ) ) {
+			$out['portal_error'] = $body->get_error_message();
+			$out['portal_url']   = $url;
+			return $out;
+		}
+
+		$out['portal_url'] = $url;
+		$text = trim( preg_replace( '/[ \t]+/', ' ', html_entity_decode( wp_strip_all_tags(
+			preg_replace( '#<(script|style)\b.*?</\1>#is', ' ',
+				preg_replace( '#<br\s*/?>|</t[dhr]>|</p>|</div>#i', "\n", $body ) )
+		), ENT_QUOTES, 'UTF-8' ) ) );
+
+		if ( empty( $out['upc'] ) && preg_match( '/\b(?:UPC|GTIN|EAN)[^0-9]{0,12}([0-9]{8,14})\b/i', $text, $m ) ) {
+			$out['upc'] = $m[1];
+		}
+		if ( empty( $out['upc'] ) && preg_match( '/\b([0-9]{12,13})\b/', $text, $m ) ) {
+			$out['upc'] = $m[1];
+		}
+		if ( empty( $out['msrp'] ) && preg_match( '/(?:MSRP|Retail|List)[^0-9$]{0,12}\$?\s*([0-9]+(?:\.[0-9]{2})?)/i', $text, $m ) ) {
+			$out['msrp'] = $m[1];
+		}
+		if ( empty( $out['title'] ) && preg_match( '/' . preg_quote( $sku, '/' ) . '\s+(.{3,160}?)\s*(?:\n|$)/is', $text, $m ) ) {
+			$out['title'] = $this->tidy_title( $m[1] );
+		}
+
+		$img = $this->extract_image( $body, $sku );
+		if ( $img && ( empty( $out['image_url'] ) || false !== stripos( (string) $out['image_url'], 'thumbnail' ) ) ) {
+			$out['image_url'] = $img;
+		}
+
+		$out['portal_bytes'] = strlen( $body );
+		$out['portal_used']  = true;
+
+		return $out;
+	}
+
 	public function vend_code() {
 		return 'SS';
 	}
@@ -114,6 +309,20 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 
 		// The page renders even for unknown SKUs, so confirm ours came back.
 		if ( false === stripos( $text, $sku ) ) {
+			// The public catalog does not list everything. If the portal is
+			// configured, it is worth asking there before giving up.
+			if ( self::portal_enabled() ) {
+				$only = $this->enrich_from_portal( $sku, array(
+					'sku' => $sku, 'title' => '', 'description' => '', 'upc' => '',
+					'msrp' => '', 'image_url' => '', 'categories' => array(),
+					'source_url' => $url, 'search_url' => $search,
+				) );
+				if ( ! empty( $only['title'] ) ) {
+					$only['title_source'] = 'portal';
+					return $only;
+				}
+			}
+
 			return new WP_Error(
 				'pci_not_found',
 				sprintf( __( 'SLS returned a page for %s but it did not contain that SKU.', 'pci' ), $sku ),
@@ -147,8 +356,12 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 			$out['msrp'] = $m[1];
 		}
 
-		$out['image_url'] = $this->extract_image( $html, $sku );
+		$out['image_url']  = $this->extract_image( $html, $sku );
 		$out['categories'] = $this->fetch_categories( $sku );
+
+		if ( self::portal_enabled() ) {
+			$out = $this->enrich_from_portal( $sku, $out );
+		}
 
 		// A page that yields no title is a parse failure, not a product.
 		if ( '' === $out['title'] ) {
