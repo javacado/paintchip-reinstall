@@ -326,13 +326,26 @@ class PCI_SLS_Catalog {
 			}
 		}
 
-		// A search can legitimately return near matches; index them anyway.
-		if ( ! empty( $parsed['items'] ) ) {
+		// A search that misses returns a broad listing rather than an empty
+		// page, so indexing those rows buries the index in products nobody
+		// asked for. Only a small, plausibly-relevant result set is kept.
+		$n = count( $parsed['items'] );
+
+		if ( $n > 0 && $n <= 25 ) {
 			self::index_items( $parsed['items'] );
-			self::mark_searched( $sku, false, sprintf( '%d near matches, no exact', count( $parsed['items'] ) ) );
+			self::mark_searched( $sku, false, sprintf( '%d near matches, no exact', $n ) );
 			return array(
 				'ok'      => false,
-				'message' => sprintf( __( '%d products returned but none matched exactly — indexed anyway.', 'pci' ), count( $parsed['items'] ) ),
+				'message' => sprintf( __( '%d near matches indexed, but none was %s exactly.', 'pci' ), $n, $sku ),
+				'item'    => null,
+			);
+		}
+
+		if ( $n > 25 ) {
+			self::mark_searched( $sku, false, sprintf( 'search returned %d rows, treated as no match', $n ) );
+			return array(
+				'ok'      => false,
+				'message' => sprintf( __( 'Search returned %d unrelated products — treated as not found.', 'pci' ), $n ),
 				'item'    => null,
 			);
 		}
@@ -576,9 +589,18 @@ class PCI_SLS_Catalog {
 		);
 	}
 
+	/**
+	 * Clear the page-crawl frontier only.
+	 *
+	 * Search attempts share this table but are deliberately spared: they are a
+	 * record of what SLS does not stock, not a work queue, and wiping them
+	 * means every dead SKU gets looked up again from scratch.
+	 */
 	public static function reset_queue() {
 		global $wpdb;
-		$wpdb->query( 'TRUNCATE TABLE ' . self::crawl_table() );
+		return (int) $wpdb->query(
+			"DELETE FROM " . self::crawl_table() . " WHERE kind <> 'search'"
+		);
 	}
 
 	/**
@@ -708,14 +730,16 @@ class PCI_SLS_Catalog {
 			$args[] = (int) $run_id;
 		}
 
+		// DISTINCT matters: the same SKU appears once per upload run, so a plain
+		// COUNT(*) multiplies both sides by the number of runs.
 		$needed = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$items} i WHERE {$where}", $args
+			"SELECT COUNT(DISTINCT i.sku) FROM {$items} i WHERE {$where} AND i.sku <> ''", $args
 		) );
 
 		$have = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$items} i
+			"SELECT COUNT(DISTINCT i.sku) FROM {$items} i
 			 INNER JOIN {$cat} c ON c.sku = i.sku
-			 WHERE {$where}", $args
+			 WHERE {$where} AND i.sku <> ''", $args
 		) );
 
 		return array(
@@ -723,6 +747,63 @@ class PCI_SLS_Catalog {
 			'have'    => $have,
 			'missing' => max( 0, $needed - $have ),
 			'pct'     => $needed > 0 ? round( $have / $needed * 100, 1 ) : 0,
+		);
+	}
+
+	/**
+	 * Side-by-side sample of what is wanted against what has been indexed.
+	 *
+	 * If coverage stays low while the index grows, the two sides are not
+	 * speaking the same language, and seeing real examples of each is the
+	 * fastest way to work out the transformation.
+	 */
+	public static function format_diagnostic( $n = 12 ) {
+		global $wpdb;
+		$items = PCI_Schema::table( 'items' );
+		$cat   = self::table();
+
+		$wanted = $wpdb->get_col( $wpdb->prepare(
+			"SELECT DISTINCT sku FROM {$items}
+			 WHERE action = %s AND vend = 'SS' AND sku <> '' ORDER BY sku LIMIT %d",
+			PCI_Classifier::NEW_P, (int) $n
+		) );
+
+		$indexed = $wpdb->get_col( $wpdb->prepare(
+			"SELECT sku FROM {$cat} ORDER BY id DESC LIMIT %d", (int) $n
+		) );
+
+		$matched = $wpdb->get_col( $wpdb->prepare(
+			"SELECT DISTINCT i.sku FROM {$items} i
+			 INNER JOIN {$cat} c ON c.sku = i.sku
+			 WHERE i.action = %s AND i.vend = 'SS' LIMIT %d",
+			PCI_Classifier::NEW_P, (int) $n
+		) );
+
+		// Case- and punctuation-insensitive match, to reveal a near miss.
+		$loose = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(DISTINCT i.sku) FROM {$items} i
+			 INNER JOIN {$cat} c
+			   ON UPPER(REPLACE(REPLACE(c.sku,'-',''),' ','')) = UPPER(REPLACE(REPLACE(i.sku,'-',''),' ',''))
+			 WHERE i.action = %s AND i.vend = 'SS' AND i.sku <> ''",
+			PCI_Classifier::NEW_P
+		) );
+
+		$junk = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$cat} WHERE upc = '' AND title = sku" );
+
+		return array(
+			'wanted'      => $wanted,
+			'indexed'     => $indexed,
+			'matched'     => $matched,
+			'loose_match' => $loose,
+			'junk_rows'   => $junk,
+		);
+	}
+
+	/** Remove index rows that carry nothing beyond a SKU. */
+	public static function purge_junk() {
+		global $wpdb;
+		return (int) $wpdb->query(
+			"DELETE FROM " . self::table() . " WHERE upc = '' AND title = sku"
 		);
 	}
 
