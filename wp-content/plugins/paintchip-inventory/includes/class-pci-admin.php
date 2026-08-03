@@ -1304,6 +1304,7 @@ class PCI_Admin {
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:8px 0 20px;">
 			<?php wp_nonce_field( 'pci_catalog' ); ?>
 			<input type="hidden" name="action" value="pci_catalog_reset">
+			<button class="button button-small" name="mode" value="retry"><?php esc_html_e( 'Retry failed pages', 'pci' ); ?></button>
 			<button class="button button-small" onclick="return confirm('<?php echo esc_js( __( 'Clear the crawl queue and start the walk again? The indexed products are kept.', 'pci' ) ); ?>');"><?php esc_html_e( 'Reset the queue', 'pci' ); ?></button>
 			<span class="pci-muted"><?php esc_html_e( 'Indexed products are kept; only the list of pages to visit is cleared.', 'pci' ); ?></span>
 		</form>
@@ -1455,6 +1456,12 @@ class PCI_Admin {
 		if ( ! current_user_can( PCI_CAP ) ) {
 			wp_die( esc_html__( 'You do not have permission to do that.', 'pci' ) );
 		}
+		if ( isset( $_POST['mode'] ) && 'retry' === $_POST['mode'] ) {
+			$n = PCI_SLS_Catalog::retry_failed();
+			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => sprintf( __( '%d failed pages put back on the queue. Press Start.', 'pci' ), $n ) ), admin_url( 'admin.php' ) ) );
+			exit;
+		}
+
 		PCI_SLS_Catalog::reset_queue();
 		wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => __( 'Crawl queue cleared. Press Start to walk the tree again.', 'pci' ) ), admin_url( 'admin.php' ) ) );
 		exit;

@@ -216,6 +216,12 @@ class PCI_SLS_Catalog {
 		// walked the tree.
 		if ( preg_match( '/var\s+tmenuItems\s*=\s*\[(.*?)\];/is', $html, $tm ) ) {
 			if ( preg_match_all( '/"([^"]*)"/', $tm[1], $entries ) ) {
+				// The array holds more than label/URL pairs — frame targets and
+				// icon paths are in there too — so pick out the URL-shaped
+				// entries and take the label from the nearest plain text before
+				// each one.
+				$skip = array( '_self', '_blank', '_parent', '_top', '_new' );
+
 				$label = '';
 				foreach ( $entries[1] as $entry ) {
 					$entry = trim( $entry );
@@ -223,18 +229,32 @@ class PCI_SLS_Catalog {
 						continue;
 					}
 
-					$is_url = ( false !== stripos( $entry, '.asp' ) )
-						|| ( false !== stripos( $entry, 'level' ) )
-						|| ( 0 === stripos( $entry, 'tm/' ) );
+					$lower = strtolower( $entry );
 
-					if ( ! $is_url ) {
-						// Entries alternate between a label and its target.
-						$label = wp_strip_all_tags( $entry );
+					if ( in_array( $lower, $skip, true ) ) {
 						continue;
 					}
 
-					$url  = self::absolutise( str_replace( ' ', '%20', html_entity_decode( $entry, ENT_QUOTES, 'UTF-8' ) ) );
-					$kind = ( false !== stripos( $url, 'fright_itemlist.asp' ) ) ? 'listing' : 'directory';
+					$is_tree = ( 0 === stripos( $entry, 'tm/' ) ) || ( '.js' === substr( $lower, -3 ) );
+					$is_page = ( false !== stripos( $entry, 'fright' ) && false !== stripos( $entry, '.asp' ) );
+
+					if ( ! $is_tree && ! $is_page ) {
+						// Icons and images are not labels either.
+						if ( ! preg_match( '/\.(gif|jpe?g|png|ico|css)$/i', $lower ) ) {
+							$label = wp_strip_all_tags( $entry );
+						}
+						continue;
+					}
+
+					$url = self::absolutise( str_replace( ' ', '%20', html_entity_decode( $entry, ENT_QUOTES, 'UTF-8' ) ) );
+
+					if ( $is_tree ) {
+						$kind = 'tree';
+					} elseif ( false !== stripos( $url, 'fright_itemlist.asp' ) ) {
+						$kind = 'listing';
+					} else {
+						$kind = 'directory';
+					}
 
 					$links[ $url ] = array( 'label' => $label, 'kind' => $kind );
 					$label         = '';
@@ -355,6 +375,14 @@ class PCI_SLS_Catalog {
 		);
 	}
 
+	/** Put failed pages back on the queue, e.g. after fixing a request header. */
+	public static function retry_failed() {
+		global $wpdb;
+		return (int) $wpdb->query(
+			"UPDATE " . self::crawl_table() . " SET status='pending', message='' WHERE status='failed'"
+		);
+	}
+
 	public static function reset_queue() {
 		global $wpdb;
 		$wpdb->query( 'TRUNCATE TABLE ' . self::crawl_table() );
@@ -374,7 +402,8 @@ class PCI_SLS_Catalog {
 		$t = self::crawl_table();
 
 		$rows = $wpdb->get_results( $wpdb->prepare(
-			"SELECT * FROM {$t} WHERE status='pending' ORDER BY kind DESC, depth ASC, id ASC LIMIT %d",
+			"SELECT * FROM {$t} WHERE status='pending'
+			 ORDER BY FIELD(kind,'listing','directory','tree'), depth ASC, id ASC LIMIT %d",
 			(int) $limit
 		) );
 

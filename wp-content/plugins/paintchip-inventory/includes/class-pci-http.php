@@ -152,7 +152,9 @@ class PCI_Http {
 			'redirection' => 5,
 			'user-agent'  => 'ThePaintChip-InventorySync/1.1 (+https://thepaint-chip.com)',
 			'headers'     => array(
-				'Accept'          => 'text/html,application/xhtml+xml',
+				// Must be permissive: the category tree is served as .js files
+				// and the server answers 406 to an html-only Accept header.
+				'Accept'          => '*/*',
 				'Accept-Language' => 'en-US,en;q=0.9',
 			),
 		);

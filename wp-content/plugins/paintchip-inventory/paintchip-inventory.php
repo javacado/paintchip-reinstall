@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Paint Chip Inventory Sync
  * Description: Imports the POS "General Inventory Full Master List" report, previews every change before it lands, applies stock through WooCommerce CRUD, and can roll the whole batch back.
- * Version:     1.4.1
+ * Version:     1.4.2
  * Requires PHP: 7.4
  * Author:      The Paint Chip
  * Text Domain: pci
@@ -10,7 +10,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PCI_VERSION', '1.4.1' );
+define( 'PCI_VERSION', '1.4.2' );
 define( 'PCI_FILE', __FILE__ );
 define( 'PCI_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PCI_URL', plugin_dir_url( __FILE__ ) );
