@@ -20,6 +20,7 @@ class PCI_Admin {
 		add_action( 'admin_post_pci_rollback', array( $this, 'handle_rollback' ) );
 		add_action( 'admin_post_pci_settings', array( $this, 'handle_settings' ) );
 		add_action( 'admin_post_pci_portal', array( $this, 'handle_portal' ) );
+		add_action( 'wp_ajax_pci_crawl', array( $this, 'ajax_crawl' ) );
 		add_action( 'admin_post_pci_export', array( $this, 'handle_export' ) );
 		add_action( 'wp_ajax_pci_scrape', array( $this, 'ajax_scrape' ) );
 		add_action( 'wp_ajax_pci_fetch_batch', array( $this, 'ajax_fetch_batch' ) );
@@ -42,6 +43,7 @@ class PCI_Admin {
 
 		add_submenu_page( self::SLUG, __( 'Batches', 'pci' ), __( 'Batches', 'pci' ), PCI_CAP, self::SLUG, array( $this, 'route' ) );
 		add_submenu_page( self::SLUG, __( 'Suppliers', 'pci' ), __( 'Suppliers', 'pci' ), PCI_CAP, self::SLUG . '-suppliers', array( $this, 'route_suppliers' ) );
+		add_submenu_page( self::SLUG, __( 'SLS catalog', 'pci' ), __( 'SLS catalog', 'pci' ), PCI_CAP, self::SLUG . '-catalog', array( $this, 'route_catalog' ) );
 		add_submenu_page( self::SLUG, __( 'Portal setup', 'pci' ), __( 'Portal setup', 'pci' ), PCI_CAP, self::SLUG . '-portal', array( $this, 'route_portal' ) );
 		add_submenu_page( self::SLUG, __( 'Settings', 'pci' ), __( 'Settings', 'pci' ), PCI_CAP, self::SLUG . '-settings', array( $this, 'route_settings' ) );
 	}
@@ -1246,6 +1248,155 @@ class PCI_Admin {
 		<?php endif; ?>
 		<?php
 		echo '</div>';
+	}
+
+	// --------------------------------------------------------- catalog screen
+
+	public function route_catalog() {
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to view this page.', 'pci' ) );
+		}
+
+		$stats = PCI_SLS_Catalog::stats();
+		$queue = get_option( 'pci_sls_crawl_queue', array() );
+
+		echo '<div class="wrap">';
+		$this->notices();
+		?>
+		<h1><?php esc_html_e( 'SLS catalog index', 'pci' ); ?></h1>
+
+		<div class="pci-note">
+			<p><?php esc_html_e( 'The SLS item page carries very little. The category listing pages carry everything — UPC, MSRP, dealer net, stock on hand and a full-size image, one row per product. This builds a local index from those listings, so sourcing becomes a lookup instead of a request per product.', 'pci' ); ?></p>
+			<p><?php esc_html_e( 'Paste listing URLs below — the ones that end in fright_itemlist.asp and show a product table. One page usually yields dozens of products.', 'pci' ); ?></p>
+		</div>
+
+		<table class="pci-ledger">
+			<tbody>
+				<tr><td><?php esc_html_e( 'Products indexed', 'pci' ); ?></td><td class="num" id="pci-cat-total"><?php echo (int) $stats['total']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'With a UPC', 'pci' ); ?></td><td class="num" id="pci-cat-upc"><?php echo (int) $stats['with_upc']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'With an image', 'pci' ); ?></td><td class="num"><?php echo (int) $stats['with_img']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'Last updated', 'pci' ); ?></td><td class="num pci-muted"><?php echo esc_html( $stats['updated'] ? $stats['updated'] : '—' ); ?></td></tr>
+			</tbody>
+		</table>
+
+		<h2 class="pci-section"><?php esc_html_e( 'Crawl listing pages', 'pci' ); ?></h2>
+		<p>
+			<textarea id="pci-crawl-urls" rows="6" class="large-text code" placeholder="https://www.slsarts.com/fright_itemlist.asp?level1=ART%20ACCESSORIES&level2=ARTIST%20KNIVES&level3=PAINTING%20-%20PALETTE&level4=SILVER%20BRUSH%20LIMITED&level5=MATTE%20BLACK"><?php echo esc_textarea( is_array( $queue ) ? implode( "\n", $queue ) : '' ); ?></textarea>
+		</p>
+		<p>
+			<button class="button button-primary" id="pci-crawl-start"><?php esc_html_e( 'Crawl these pages', 'pci' ); ?></button>
+			<span id="pci-crawl-status" class="pci-muted"></span>
+		</p>
+		<div id="pci-crawl-log" class="pci-scroll" style="display:none;padding:10px;background:#fff;"></div>
+
+		<h2 class="pci-section"><?php esc_html_e( 'What is indexed', 'pci' ); ?></h2>
+		<?php
+		global $wpdb;
+		$t    = PCI_SLS_Catalog::table();
+		$rows = $wpdb->get_results( "SELECT * FROM {$t} ORDER BY updated_at DESC LIMIT 50" );
+		if ( empty( $rows ) ) :
+			?>
+			<p class="pci-muted"><?php esc_html_e( 'Nothing indexed yet.', 'pci' ); ?></p>
+		<?php else : ?>
+			<table class="widefat striped">
+				<thead><tr>
+					<th><?php esc_html_e( 'SKU', 'pci' ); ?></th>
+					<th><?php esc_html_e( 'Title', 'pci' ); ?></th>
+					<th><?php esc_html_e( 'UPC', 'pci' ); ?></th>
+					<th><?php esc_html_e( 'MSRP', 'pci' ); ?></th>
+					<th><?php esc_html_e( 'SLS stock', 'pci' ); ?></th>
+					<th><?php esc_html_e( 'Category', 'pci' ); ?></th>
+				</tr></thead>
+				<tbody>
+				<?php foreach ( $rows as $r ) : $c = json_decode( (string) $r->categories, true ); ?>
+					<tr>
+						<td><code><?php echo esc_html( $r->sku ); ?></code></td>
+						<td><?php echo esc_html( $r->title ); ?></td>
+						<td><?php echo $r->upc ? '<code>' . esc_html( $r->upc ) . '</code>' : '<span class="pci-muted">—</span>'; ?></td>
+						<td><?php echo null === $r->msrp ? '—' : esc_html( '$' . $r->msrp ); ?></td>
+						<td><?php echo (int) $r->qoh; ?></td>
+						<td class="pci-muted"><?php echo esc_html( is_array( $c ) ? implode( ' › ', array_slice( $c, -2 ) ) : '' ); ?></td>
+					</tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
+			<p class="pci-muted"><?php esc_html_e( 'Showing the 50 most recently indexed.', 'pci' ); ?></p>
+		<?php endif; ?>
+
+		<script>
+		(function () {
+			var nonce = <?php echo wp_json_encode( wp_create_nonce( 'pci_crawl' ) ); ?>;
+			var btn = document.getElementById('pci-crawl-start');
+			var log = document.getElementById('pci-crawl-log');
+			var status = document.getElementById('pci-crawl-status');
+			var urls = [], idx = 0;
+
+			function next() {
+				if (idx >= urls.length) {
+					status.textContent = 'Done. ' + urls.length + ' pages crawled.';
+					btn.disabled = false;
+					return;
+				}
+				var url = urls[idx++];
+				status.textContent = 'Crawling ' + idx + ' of ' + urls.length + '…';
+
+				var body = new FormData();
+                body.append('action', 'pci_crawl');
+				body.append('url', url);
+				body.append('_ajax_nonce', nonce);
+
+				fetch(ajaxurl, { method: 'POST', body: body, credentials: 'same-origin' })
+					.then(function (r) { return r.json(); })
+					.then(function (res) {
+						var d = res.data || {};
+						var line = document.createElement('div');
+						line.style.borderBottom = '1px solid #eee';
+						line.style.padding = '4px 0';
+						line.innerHTML = (d.ok ? '<span style="color:#00a32a">&#10003;</span> ' : '<span style="color:#d63638">&#10007;</span> ')
+							+ '<strong>' + (d.category || url) + '</strong><br><span style="color:#646970">' + (d.message || 'failed') + '</span>';
+						log.appendChild(line);
+						if (d.total !== undefined) {
+							document.getElementById('pci-cat-total').textContent = d.total;
+							document.getElementById('pci-cat-upc').textContent = d.with_upc;
+						}
+						next();
+					})
+					.catch(function () { next(); });
+			}
+
+			btn.addEventListener('click', function (e) {
+				e.preventDefault();
+				urls = document.getElementById('pci-crawl-urls').value
+					.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+				if (!urls.length) { status.textContent = 'Paste at least one listing URL.'; return; }
+				idx = 0;
+				log.style.display = 'block';
+				log.innerHTML = '';
+				btn.disabled = true;
+				next();
+			});
+		})();
+		</script>
+		<?php
+		echo '</div>';
+	}
+
+	public function ajax_crawl() {
+		check_ajax_referer( 'pci_crawl' );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_send_json_error( __( 'You do not have permission to crawl.', 'pci' ) );
+		}
+
+		@set_time_limit( 120 );
+
+		$url = isset( $_POST['url'] ) ? esc_url_raw( wp_unslash( $_POST['url'] ) ) : '';
+		$res = PCI_SLS_Catalog::crawl_url( $url );
+
+		$stats            = PCI_SLS_Catalog::stats();
+		$res['total']     = $stats['total'];
+		$res['with_upc']  = $stats['with_upc'];
+
+		wp_send_json_success( $res );
 	}
 
 	// ---------------------------------------------------------- portal screen

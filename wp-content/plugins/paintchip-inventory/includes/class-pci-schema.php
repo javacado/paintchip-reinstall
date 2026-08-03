@@ -13,7 +13,7 @@ defined( 'ABSPATH' ) || exit;
  */
 class PCI_Schema {
 
-	const DB_VERSION = '1.0.0';
+	const DB_VERSION = '1.1.0';
 	const OPT_DB     = 'pci_db_version';
 
 	public static function table( $name ) {
@@ -97,6 +97,26 @@ class PCI_Schema {
 			PRIMARY KEY (id),
 			KEY run (run_id),
 			KEY product (product_id)
+		) {$charset};" );
+
+		$catalog = $wpdb->prefix . 'pci_catalog';
+		dbDelta( "CREATE TABLE {$catalog} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			sku VARCHAR(100) NOT NULL DEFAULT '',
+			vend VARCHAR(10) NOT NULL DEFAULT '',
+			title VARCHAR(250) NOT NULL DEFAULT '',
+			upc VARCHAR(20) NOT NULL DEFAULT '',
+			msrp DECIMAL(12,2) NULL,
+			net DECIMAL(12,2) NULL,
+			qoh INT NOT NULL DEFAULT 0,
+			image_url VARCHAR(500) NOT NULL DEFAULT '',
+			categories TEXT NULL,
+			raw LONGTEXT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (id),
+			UNIQUE KEY sku (sku),
+			KEY vend (vend),
+			KEY upc (upc)
 		) {$charset};" );
 
 		update_option( self::OPT_DB, self::DB_VERSION );

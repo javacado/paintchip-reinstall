@@ -291,6 +291,30 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 
 	public function fetch( $sku ) {
 		$sku = trim( (string) $sku );
+
+		// The catalog index is built from listing pages, which carry the UPC,
+		// MSRP, stock and a full-size image. If the SKU is indexed there is
+		// nothing to gain from a request.
+		if ( class_exists( 'PCI_SLS_Catalog' ) ) {
+			$row = PCI_SLS_Catalog::lookup( $sku );
+			if ( $row ) {
+				$raw  = json_decode( (string) $row->raw, true );
+				$cats = json_decode( (string) $row->categories, true );
+				return array(
+					'sku'          => $row->sku,
+					'title'        => $row->title,
+					'description'  => ( is_array( $raw ) && ! empty( $raw['category_copy'] ) ) ? $raw['category_copy'] : '',
+					'upc'          => $row->upc,
+					'msrp'         => null === $row->msrp ? '' : $row->msrp,
+					'image_url'    => $row->image_url,
+					'categories'   => is_array( $cats ) ? $cats : array(),
+					'source_url'   => self::item_url( $sku ),
+					'search_url'   => self::search_url( $sku ),
+					'from_catalog' => true,
+					'supplier_qoh' => (int) $row->qoh,
+				);
+			}
+		}
 		if ( '' === $sku ) {
 			return new WP_Error( 'pci_no_sku', __( 'No SKU was supplied.', 'pci' ) );
 		}
