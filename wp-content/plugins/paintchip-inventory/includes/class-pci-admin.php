@@ -1310,6 +1310,16 @@ class PCI_Admin {
 
 		<div id="pci-crawl-log" class="pci-scroll" style="display:none;padding:10px;background:#fff;max-width:900px;"></div>
 
+		<?php $empty = get_option( 'pci_sls_last_empty' ); if ( is_array( $empty ) && ! empty( $empty['url'] ) ) : ?>
+			<div class="pci-section">
+				<h2><?php esc_html_e( 'Last page that yielded nothing', 'pci' ); ?></h2>
+				<p class="pci-muted"><?php esc_html_e( 'Kept so a parsing failure can be told apart from a genuinely empty branch.', 'pci' ); ?></p>
+				<p><a href="<?php echo esc_url( $empty['url'] ); ?>" target="_blank" rel="noopener"><code><?php echo esc_html( $empty['url'] ); ?></code></a>
+					<span class="pci-muted"> · <?php echo (int) $empty['bytes']; ?> bytes · <?php echo esc_html( $empty['when'] ); ?></span></p>
+				<pre class="pci-scroll" style="padding:10px;white-space:pre-wrap;max-height:260px;"><?php echo esc_html( $empty['excerpt'] ); ?></pre>
+			</div>
+		<?php endif; ?>
+
 		<?php
 		$missing = PCI_SLS_Catalog::missing_skus( 100 );
 		if ( ! empty( $missing ) ) :

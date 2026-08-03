@@ -207,6 +207,41 @@ class PCI_SLS_Catalog {
 	public static function parse_links( $html ) {
 		$links = array();
 
+		// The category tree is not markup. It is a JavaScript array:
+		//
+		//   var tmenuItems = [ "...", "fright.asp?level1=X&level2=Y", "tm/tm12.asp" ];
+		//
+		// which the expander widget renders client-side. Anchors alone find
+		// nothing, so read the array directly — this is how the original tool
+		// walked the tree.
+		if ( preg_match( '/var\s+tmenuItems\s*=\s*\[(.*?)\];/is', $html, $tm ) ) {
+			if ( preg_match_all( '/"([^"]*)"/', $tm[1], $entries ) ) {
+				$label = '';
+				foreach ( $entries[1] as $entry ) {
+					$entry = trim( $entry );
+					if ( '' === $entry ) {
+						continue;
+					}
+
+					$is_url = ( false !== stripos( $entry, '.asp' ) )
+						|| ( false !== stripos( $entry, 'level' ) )
+						|| ( 0 === stripos( $entry, 'tm/' ) );
+
+					if ( ! $is_url ) {
+						// Entries alternate between a label and its target.
+						$label = wp_strip_all_tags( $entry );
+						continue;
+					}
+
+					$url  = self::absolutise( str_replace( ' ', '%20', html_entity_decode( $entry, ENT_QUOTES, 'UTF-8' ) ) );
+					$kind = ( false !== stripos( $url, 'fright_itemlist.asp' ) ) ? 'listing' : 'directory';
+
+					$links[ $url ] = array( 'label' => $label, 'kind' => $kind );
+					$label         = '';
+				}
+			}
+		}
+
 		if ( preg_match_all( '#<a[^>]+href=[\'"]([^\'"]*fright[^\'"]*\.asp[^\'"]*)[\'"][^>]*>(.*?)</a>#is', $html, $m, PREG_SET_ORDER ) ) {
 			foreach ( $m as $hit ) {
 				$href = html_entity_decode( $hit[1], ENT_QUOTES, 'UTF-8' );
@@ -385,10 +420,30 @@ class PCI_SLS_Catalog {
 
 			$label = $parsed['category'] ? implode( ' > ', $parsed['category'] ) : ( $row->label ? $row->label : $row->url );
 
+			// A page that yields neither products nor links is a parsing
+			// failure, not an empty branch. Keep enough of it to diagnose.
+			$diagnostic = '';
+			if ( 0 === $found && 0 === $queued ) {
+				$has_tm  = ( false !== stripos( $html, 'tmenuItems' ) );
+				$has_row = ( false !== stripos( $html, 'slssku' ) );
+				$diagnostic = sprintf(
+					'nothing found — %d bytes, tmenuItems:%s slssku:%s',
+					strlen( $html ),
+					$has_tm ? 'yes' : 'no',
+					$has_row ? 'yes' : 'no'
+				);
+				update_option( 'pci_sls_last_empty', array(
+					'url'     => $row->url,
+					'bytes'   => strlen( $html ),
+					'excerpt' => PCI_Scraper_SLS::excerpt( $html, 1500 ),
+					'when'    => current_time( 'mysql' ),
+				), false );
+			}
+
 			$wpdb->update( $t, array(
 				'status'      => 'done',
 				'items_found' => $found,
-				'message'     => sprintf( '%d products, %d links queued', $found, $queued ),
+				'message'     => $diagnostic ? $diagnostic : sprintf( '%d products, %d links queued', $found, $queued ),
 				'crawled_at'  => current_time( 'mysql' ),
 			), array( 'id' => (int) $row->id ) );
 
@@ -397,7 +452,7 @@ class PCI_SLS_Catalog {
 				'label'   => $label,
 				'message' => $found
 					? sprintf( __( '%1$d products (%2$d new), %3$d links queued', 'pci' ), $found, $added, $queued )
-					: sprintf( __( 'directory — %d links queued', 'pci' ), $queued ),
+					: ( $diagnostic ? $diagnostic : sprintf( __( 'directory — %d links queued', 'pci' ), $queued ) ),
 			);
 
 			// Ancient IIS box; do not hammer it.
