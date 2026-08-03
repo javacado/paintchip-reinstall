@@ -195,16 +195,274 @@ class PCI_SLS_Catalog {
 		return $url;
 	}
 
-	/** Sub-category links on a directory page. */
-	public static function parse_directory( $html ) {
+	/**
+	 * Every catalog link on a page, whether directory or listing.
+	 *
+	 * The tree renders as JavaScript expanders, but the underlying anchors are
+	 * present in the HTML, so following links is enough — no need to model the
+	 * tree or know its depth in advance.
+	 *
+	 * @return array url => array{label:string,kind:string}
+	 */
+	public static function parse_links( $html ) {
 		$links = array();
-		if ( preg_match_all( '#<a[^>]+href=[\'"]([^\'"]*fright_itemlist\.asp[^\'"]*)[\'"][^>]*>(.*?)</a>#is', $html, $m, PREG_SET_ORDER ) ) {
+
+		if ( preg_match_all( '#<a[^>]+href=[\'"]([^\'"]*fright[^\'"]*\.asp[^\'"]*)[\'"][^>]*>(.*?)</a>#is', $html, $m, PREG_SET_ORDER ) ) {
 			foreach ( $m as $hit ) {
-				$url = self::absolutise( html_entity_decode( str_replace( ' ', '%20', $hit[1] ), ENT_QUOTES, 'UTF-8' ) );
-				$links[ $url ] = trim( wp_strip_all_tags( $hit[2] ) );
+				$href = html_entity_decode( $hit[1], ENT_QUOTES, 'UTF-8' );
+
+				// Breadcrumb links point back up the tree; skip them.
+				if ( false !== stripos( $href, 'javascript:' ) ) {
+					continue;
+				}
+
+				$url  = self::absolutise( str_replace( ' ', '%20', $href ) );
+				$kind = ( false !== stripos( $url, 'fright_itemlist.asp' ) ) ? 'listing' : 'directory';
+
+				$links[ $url ] = array(
+					'label' => trim( wp_strip_all_tags( $hit[2] ) ),
+					'kind'  => $kind,
+				);
 			}
 		}
+
 		return $links;
+	}
+
+	/** Kept for compatibility; listings only. */
+	public static function parse_directory( $html ) {
+		$out = array();
+		foreach ( self::parse_links( $html ) as $url => $meta ) {
+			if ( 'listing' === $meta['kind'] ) {
+				$out[ $url ] = $meta['label'];
+			}
+		}
+		return $out;
+	}
+
+	// ------------------------------------------------------------- the queue
+
+	/** Top-level categories, as listed by the portal's own browse page. */
+	public static function top_level_categories() {
+		return array(
+			'**** NEW ITEMS ****',
+			'AIRBRUSH SUPPLIES',
+			'ART ACCESSORIES',
+			'ASSORTMENTS AND DISPLAYS',
+			'BASIC CRAFT SUPPLIES',
+			'BOOKS',
+			'BRUSHES AND BRUSH CARE',
+			'CANVAS AND SURFACES',
+			'CHILDRENS CRAFTS',
+			'CLAYS AND ACCESSORIES',
+			'DRAWING SUPPLIES',
+			'PAINTS, MEDIUMS AND FINISHES',
+			'PAPER AND PADS',
+			'PENS AND MARKERS',
+			'PRINTMAKING',
+			'TAPES AND ADHESIVES',
+			'W/H BARGAIN BIN',
+			'DROP-SHIP ONLY PRODUCTS',
+		);
+	}
+
+	public static function crawl_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'pci_crawl';
+	}
+
+	/**
+	 * Add a URL to the frontier.
+	 *
+	 * The unique hash makes this idempotent, so re-discovering a link that has
+	 * already been crawled is a no-op rather than an endless loop.
+	 */
+	public static function enqueue( $url, $kind = 'directory', $label = '', $depth = 0 ) {
+		global $wpdb;
+		$url = trim( (string) $url );
+		if ( '' === $url ) {
+			return false;
+		}
+
+		return (bool) $wpdb->query( $wpdb->prepare(
+			"INSERT IGNORE INTO " . self::crawl_table() . "
+			 (url, url_hash, kind, label, depth, status, created_at)
+			 VALUES (%s, %s, %s, %s, %d, 'pending', %s)",
+			substr( $url, 0, 500 ),
+			sha1( $url ),
+			$kind,
+			substr( $label, 0, 250 ),
+			(int) $depth,
+			current_time( 'mysql' )
+		) );
+	}
+
+	/** Seed the frontier with the top-level category directories. */
+	public static function seed() {
+		$n = 0;
+		foreach ( self::top_level_categories() as $cat ) {
+			$url = self::BASE . 'fright.asp?level1=' . rawurlencode( $cat );
+			if ( self::enqueue( $url, 'directory', $cat, 0 ) ) {
+				$n++;
+			}
+		}
+		return $n;
+	}
+
+	public static function queue_stats() {
+		global $wpdb;
+		$t = self::crawl_table();
+		return array(
+			'pending' => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$t} WHERE status='pending'" ),
+			'done'    => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$t} WHERE status='done'" ),
+			'failed'  => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$t} WHERE status='failed'" ),
+			'total'   => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$t}" ),
+		);
+	}
+
+	public static function reset_queue() {
+		global $wpdb;
+		$wpdb->query( 'TRUNCATE TABLE ' . self::crawl_table() );
+	}
+
+	/**
+	 * Crawl the next few pages in the frontier.
+	 *
+	 * Listings get their products indexed; directories contribute their links.
+	 * Either way any new catalog link found is queued, so the spider walks the
+	 * whole tree from the seeds without needing to know its shape.
+	 *
+	 * @return array
+	 */
+	public static function crawl_step( $limit = 3, $max_depth = 8 ) {
+		global $wpdb;
+		$t = self::crawl_table();
+
+		$rows = $wpdb->get_results( $wpdb->prepare(
+			"SELECT * FROM {$t} WHERE status='pending' ORDER BY kind DESC, depth ASC, id ASC LIMIT %d",
+			(int) $limit
+		) );
+
+		$log = array();
+
+		foreach ( $rows as $row ) {
+			$wpdb->update( $t, array( 'status' => 'working' ), array( 'id' => (int) $row->id ) );
+
+			$scraper = new PCI_Scraper_SLS();
+			$html    = PCI_Scraper_SLS::portal_enabled()
+				? $scraper->portal_get( $row->url )
+				: ( new PCI_Http( 'SS' ) )->get( $row->url );
+
+			if ( is_wp_error( $html ) ) {
+				$wpdb->update( $t, array(
+					'status'     => 'failed',
+					'message'    => substr( $html->get_error_message(), 0, 250 ),
+					'crawled_at' => current_time( 'mysql' ),
+				), array( 'id' => (int) $row->id ) );
+
+				$log[] = array( 'ok' => false, 'label' => $row->label ? $row->label : $row->url, 'message' => $html->get_error_message() );
+				continue;
+			}
+
+			$parsed = self::parse_listing( $html );
+			$found  = count( $parsed['items'] );
+			$added  = 0;
+
+			if ( $found ) {
+				$res   = self::index_items( $parsed['items'] );
+				$added = $res['added'];
+			}
+
+			// Follow every catalog link on the page.
+			$queued = 0;
+			if ( (int) $row->depth < $max_depth ) {
+				foreach ( self::parse_links( $html ) as $url => $meta ) {
+					if ( self::enqueue( $url, $meta['kind'], $meta['label'], (int) $row->depth + 1 ) ) {
+						$queued++;
+					}
+				}
+			}
+
+			$label = $parsed['category'] ? implode( ' > ', $parsed['category'] ) : ( $row->label ? $row->label : $row->url );
+
+			$wpdb->update( $t, array(
+				'status'      => 'done',
+				'items_found' => $found,
+				'message'     => sprintf( '%d products, %d links queued', $found, $queued ),
+				'crawled_at'  => current_time( 'mysql' ),
+			), array( 'id' => (int) $row->id ) );
+
+			$log[] = array(
+				'ok'      => true,
+				'label'   => $label,
+				'message' => $found
+					? sprintf( __( '%1$d products (%2$d new), %3$d links queued', 'pci' ), $found, $added, $queued )
+					: sprintf( __( 'directory — %d links queued', 'pci' ), $queued ),
+			);
+
+			// Ancient IIS box; do not hammer it.
+			usleep( 500000 );
+		}
+
+		return array(
+			'log'      => $log,
+			'queue'    => self::queue_stats(),
+			'catalog'  => self::stats(),
+			'coverage' => self::coverage(),
+		);
+	}
+
+	/**
+	 * How much of what we actually need is now indexed.
+	 *
+	 * This is the number that matters: not how big the catalog index is, but
+	 * how many of the SKUs waiting to be sourced can now be resolved locally.
+	 */
+	public static function coverage( $run_id = 0 ) {
+		global $wpdb;
+		$items = PCI_Schema::table( 'items' );
+		$cat   = self::table();
+
+		$where = "i.action = %s AND i.vend = 'SS'";
+		$args  = array( PCI_Classifier::NEW_P );
+
+		if ( $run_id ) {
+			$where .= ' AND i.run_id = %d';
+			$args[] = (int) $run_id;
+		}
+
+		$needed = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$items} i WHERE {$where}", $args
+		) );
+
+		$have = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$items} i
+			 INNER JOIN {$cat} c ON c.sku = i.sku
+			 WHERE {$where}", $args
+		) );
+
+		return array(
+			'needed'  => $needed,
+			'have'    => $have,
+			'missing' => max( 0, $needed - $have ),
+			'pct'     => $needed > 0 ? round( $have / $needed * 100, 1 ) : 0,
+		);
+	}
+
+	/** SKUs still unresolved, for a targeted follow-up. */
+	public static function missing_skus( $limit = 200 ) {
+		global $wpdb;
+		$items = PCI_Schema::table( 'items' );
+		$cat   = self::table();
+
+		return $wpdb->get_col( $wpdb->prepare(
+			"SELECT DISTINCT i.sku FROM {$items} i
+			 LEFT JOIN {$cat} c ON c.sku = i.sku
+			 WHERE i.action = %s AND i.vend = 'SS' AND c.id IS NULL AND i.sku <> ''
+			 ORDER BY i.sku LIMIT %d",
+			PCI_Classifier::NEW_P,
+			(int) $limit
+		) );
 	}
 
 	// ----------------------------------------------------------------- index

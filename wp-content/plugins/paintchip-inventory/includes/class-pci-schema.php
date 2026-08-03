@@ -13,7 +13,7 @@ defined( 'ABSPATH' ) || exit;
  */
 class PCI_Schema {
 
-	const DB_VERSION = '1.1.0';
+	const DB_VERSION = '1.2.0';
 	const OPT_DB     = 'pci_db_version';
 
 	public static function table( $name ) {
@@ -117,6 +117,24 @@ class PCI_Schema {
 			UNIQUE KEY sku (sku),
 			KEY vend (vend),
 			KEY upc (upc)
+		) {$charset};" );
+
+		$crawl = $wpdb->prefix . 'pci_crawl';
+		dbDelta( "CREATE TABLE {$crawl} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			url VARCHAR(500) NOT NULL DEFAULT '',
+			url_hash CHAR(40) NOT NULL DEFAULT '',
+			kind VARCHAR(20) NOT NULL DEFAULT 'directory',
+			label VARCHAR(250) NOT NULL DEFAULT '',
+			depth SMALLINT NOT NULL DEFAULT 0,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			items_found INT NOT NULL DEFAULT 0,
+			message VARCHAR(250) NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			crawled_at DATETIME NULL,
+			PRIMARY KEY (id),
+			UNIQUE KEY url_hash (url_hash),
+			KEY status (status)
 		) {$charset};" );
 
 		update_option( self::OPT_DB, self::DB_VERSION );
