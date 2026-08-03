@@ -235,8 +235,30 @@ class PCI_SLS_Catalog {
 	 * UPC and the category path. Far cheaper than crawling the whole tree when
 	 * only a few hundred SKUs are wanted.
 	 */
+	/**
+	 * Global SKU search.
+	 *
+	 * Every parameter has to be present, empty ones included. A shortened query
+	 * string does not error — it quietly returns a default listing, so the
+	 * search appears to work while never finding the requested SKU. The empty
+	 * level1..level5 are what make the search global rather than scoped to a
+	 * category.
+	 */
 	public static function search_url( $sku ) {
-		return self::BASE . 'fright_itemlist.asp?findtype=&txtfind=' . rawurlencode( trim( (string) $sku ) );
+		return self::BASE . 'fright_itemlist.asp?' . http_build_query( array(
+			'level1'    => '',
+			'level2'    => '',
+			'level3'    => '',
+			'level4'    => '',
+			'level5'    => '',
+			'skuonly'   => '',
+			'txtfind'   => trim( (string) $sku ),
+			'ltlonly'   => '',
+			'Findimg'   => '',
+			'findclick' => '',
+			'newsearch' => '',
+			'brand'     => '',
+		) );
 	}
 
 	/**
