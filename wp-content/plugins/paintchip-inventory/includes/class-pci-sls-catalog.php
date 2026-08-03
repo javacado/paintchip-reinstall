@@ -93,10 +93,21 @@ class PCI_SLS_Catalog {
 		return $out;
 	}
 
-	/** @return array|null */
+	/**
+	 * Read one product row.
+	 *
+	 * Cells are located by their content, not by their attributes. The markup
+	 * varies between categories — single vs double quoted attributes, different
+	 * column widths, "Drop Ship Only" where a stock figure normally sits — so
+	 * anchoring on `width='29%'` silently produced rows with a SKU and nothing
+	 * else. Splitting into cells and identifying them by what they contain is
+	 * far more durable.
+	 *
+	 * @return array|null
+	 */
 	private static function parse_row( $row ) {
 		$sku = '';
-		if ( preg_match( "/name='os\d+'\s+value='([^']+)'/i", $row, $m ) ) {
+		if ( preg_match( '/name=[\'"]os\d+[\'"]\s+value=[\'"]([^\'"]+)[\'"]/i', $row, $m ) ) {
 			$sku = trim( $m[1] );
 		} elseif ( preg_match( '/slssku=([A-Za-z0-9\-\.]+)/i', $row, $m ) ) {
 			$sku = trim( $m[1] );
@@ -120,50 +131,91 @@ class PCI_SLS_Catalog {
 			'thumb_url'   => '',
 		);
 
-		// Description cell: text, <br>, then the UPC.
-		if ( preg_match( "#<td[^>]*width='29%'[^>]*>\s*<font[^>]*>(.*?)</font#is", $row, $m ) ) {
-			$cell = $m[1];
-			$bits = preg_split( '#<br\s*/?>#i', $cell, 2 );
-			$item['title'] = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( $bits[0] ) ) );
-			if ( isset( $bits[1] ) && preg_match( '/([0-9]{8,14})/', wp_strip_all_tags( $bits[1] ), $u ) ) {
-				$item['upc'] = $u[1];
+		// Split the row into cells.
+		$cells = array();
+		if ( preg_match_all( '#<td\b[^>]*>(.*?)(?=<td\b|</tr>|$)#is', $row, $cm ) ) {
+			$cells = $cm[1];
+		}
+
+		$money = array();
+
+		foreach ( $cells as $cell ) {
+			$text = trim( preg_replace( '/[ \t]+/', ' ',
+				html_entity_decode( wp_strip_all_tags(
+					preg_replace( '#<br\s*/?>#i', "\n", $cell )
+				), ENT_QUOTES, 'UTF-8' ) ) );
+
+			if ( '' === $text ) {
+				continue;
+			}
+
+			// Description cell: free text on one line, a long digit run on the
+			// next. That pairing is unique to the Description/UPC column.
+			if ( '' === $item['title'] && preg_match( '/^(.*\S.*)\n\s*(\d{8,14})\b/s', $text, $d ) ) {
+				$title = trim( preg_replace( '/\s+/', ' ', $d[1] ) );
+				if ( strtoupper( $title ) !== strtoupper( $sku ) && strlen( $title ) > 3 ) {
+					$item['title'] = $title;
+					$item['upc']   = $d[2];
+					continue;
+				}
+			}
+
+			// Stock: either N-24 / V-15, or wording like "Drop Ship Only".
+			if ( preg_match_all( '/\b([NVD])-(\d+)\b/', $text, $q, PREG_SET_ORDER ) ) {
+				$total = 0;
+				$parts = array();
+				foreach ( $q as $hit ) {
+					$total  += (int) $hit[2];
+					$parts[] = strtoupper( $hit[1] ) . '-' . (int) $hit[2];
+				}
+				$item['qoh']        = $total;
+				$item['qoh_detail'] = implode( ' ', $parts );
+				continue;
+			}
+			if ( '' === $item['qoh_detail'] && preg_match( '/drop\s*ship/i', $text ) ) {
+				$item['qoh_detail'] = 'Drop Ship Only';
+				continue;
+			}
+
+			// Money and plain numbers, in document order.
+			if ( preg_match( '/^\$?\s*([0-9]+(?:\.[0-9]{2})?)$/', $text, $n ) ) {
+				$money[] = array( 'value' => $n[1], 'currency' => ( false !== strpos( $text, '$' ) ) );
 			}
 		}
 
-		// Fall back to the SKU link text if the description cell moved.
-        if ( '' === $item['title'] && preg_match( '#>\s*' . preg_quote( $sku, '#' ) . '\s*<#i', $row ) ) {
+		// Fall back to any long digit run if the description cell was unusual.
+		if ( '' === $item['upc'] && preg_match( '/\b(\d{11,14})\b/', wp_strip_all_tags( $row ), $u ) ) {
+			$item['upc'] = $u[1];
+		}
+
+		// The last three numeric cells are MSRP, discount and net. Anchoring on
+		// the currency-marked ones keeps the DS/WH minimums out of it.
+		$cur = array_values( array_filter( $money, function ( $x ) { return $x['currency']; } ) );
+		if ( count( $cur ) >= 2 ) {
+			$item['msrp'] = $cur[0]['value'];
+			$item['net']  = $cur[ count( $cur ) - 1 ]['value'];
+			foreach ( $money as $i => $x ) {
+				if ( ! $x['currency'] && $i > 0 && (float) $x['value'] > 0 && (float) $x['value'] <= 100 ) {
+					$item['disc'] = $x['value'];
+				}
+			}
+		} elseif ( count( $money ) >= 3 ) {
+			$n            = count( $money );
+			$item['msrp'] = $money[ $n - 3 ]['value'];
+			$item['disc'] = $money[ $n - 2 ]['value'];
+			$item['net']  = $money[ $n - 1 ]['value'];
+		}
+
+		if ( '' === $item['title'] ) {
 			$item['title'] = $sku;
-		}
-
-		// Stock on hand, split across warehouses: N = New Orleans, V = Vegas.
-		if ( preg_match_all( '/<span>([NVD])-(\d+)<\/span>/i', $row, $q, PREG_SET_ORDER ) ) {
-			$total = 0;
-			$parts = array();
-			foreach ( $q as $hit ) {
-				$total  += (int) $hit[2];
-				$parts[] = strtoupper( $hit[1] ) . '-' . (int) $hit[2];
-			}
-			$item['qoh']        = $total;
-			$item['qoh_detail'] = implode( ' ', $parts );
-		}
-
-		// Money columns, in document order: MSRP, discount, net.
-		if ( preg_match_all( "/<td[^>]*align='right'[^>]*>\s*<font[^>]*>\s*\\\$?([0-9]+(?:\.[0-9]{2})?)/i", $row, $money ) ) {
-			$vals = $money[1];
-			$n    = count( $vals );
-			if ( $n >= 3 ) {
-				$item['msrp'] = $vals[ $n - 3 ];
-				$item['disc'] = $vals[ $n - 2 ];
-				$item['net']  = $vals[ $n - 1 ];
-			}
 		}
 
 		// Image. The page's own onimgError walks thumbnails -> Small -> Regular
 		// -> Large, so the large variant is derivable from the thumbnail path.
-		if ( preg_match( '/<img[^>]+src="([^"]*Product Images[^"]*)"/i', $row, $m ) ) {
-			$thumb              = html_entity_decode( $m[1], ENT_QUOTES, 'UTF-8' );
-			$item['thumb_url']  = self::absolutise( $thumb );
-			$item['image_url']  = self::absolutise( str_ireplace(
+		if ( preg_match( '/<img[^>]+src=[\'"]([^\'"]*Product Images[^\'"]*)[\'"]/i', $row, $m ) ) {
+			$thumb             = html_entity_decode( $m[1], ENT_QUOTES, 'UTF-8' );
+			$item['thumb_url'] = self::absolutise( $thumb );
+			$item['image_url'] = self::absolutise( str_ireplace(
 				array( '/thumbnails/', '/Thumbnails/' ),
 				'/Large Images/',
 				$thumb
@@ -171,6 +223,88 @@ class PCI_SLS_Catalog {
 		}
 
 		return $item;
+	}
+
+	// ---------------------------------------------------------------- search
+
+	/**
+	 * Look one SKU up directly.
+	 *
+	 * The listing page takes a txtfind parameter, so a single product can be
+	 * fetched in listing context — which is the only context that carries the
+	 * UPC and the category path. Far cheaper than crawling the whole tree when
+	 * only a few hundred SKUs are wanted.
+	 */
+	public static function search_url( $sku ) {
+		return self::BASE . 'fright_itemlist.asp?findtype=&txtfind=' . rawurlencode( trim( (string) $sku ) );
+	}
+
+	/**
+	 * Fetch and index a single SKU via search.
+	 *
+	 * @return array{ok:bool,message:string,item:array|null}
+	 */
+	public static function find_sku( $sku ) {
+		$sku = trim( (string) $sku );
+		if ( '' === $sku ) {
+			return array( 'ok' => false, 'message' => __( 'No SKU given.', 'pci' ), 'item' => null );
+		}
+
+		$url     = self::search_url( $sku );
+		$scraper = new PCI_Scraper_SLS();
+		$html    = PCI_Scraper_SLS::portal_enabled() ? $scraper->portal_get( $url ) : ( new PCI_Http( 'SS' ) )->get( $url );
+
+		if ( is_wp_error( $html ) ) {
+			return array( 'ok' => false, 'message' => $html->get_error_message(), 'item' => null );
+		}
+
+		$parsed = self::parse_listing( $html );
+
+		foreach ( $parsed['items'] as $item ) {
+			if ( 0 === strcasecmp( $item['sku'], $sku ) ) {
+				self::index_items( array( $item ) );
+				return array(
+					'ok'      => true,
+					'message' => sprintf( __( 'Found: %s', 'pci' ), $item['title'] ),
+					'item'    => $item,
+				);
+			}
+		}
+
+		// A search can legitimately return near matches; index them anyway.
+		if ( ! empty( $parsed['items'] ) ) {
+			self::index_items( $parsed['items'] );
+			return array(
+				'ok'      => false,
+				'message' => sprintf( __( 'Search returned %d products but none matched exactly.', 'pci' ), count( $parsed['items'] ) ),
+				'item'    => null,
+			);
+		}
+
+		return array( 'ok' => false, 'message' => __( 'No product found for that SKU.', 'pci' ), 'item' => null );
+	}
+
+	/**
+	 * Work through the SKUs we still need, one search each.
+	 *
+	 * @return array
+	 */
+	public static function find_missing( $limit = 5 ) {
+		$skus = self::missing_skus( $limit );
+		$log  = array();
+
+		foreach ( $skus as $sku ) {
+			$res   = self::find_sku( $sku );
+			$log[] = array( 'ok' => $res['ok'], 'label' => $sku, 'message' => $res['message'] );
+			usleep( 400000 );
+		}
+
+		return array(
+			'log'      => $log,
+			'catalog'  => self::stats(),
+			'coverage' => self::coverage(),
+			'queue'    => self::queue_stats(),
+		);
 	}
 
 	public static function absolutise( $path ) {

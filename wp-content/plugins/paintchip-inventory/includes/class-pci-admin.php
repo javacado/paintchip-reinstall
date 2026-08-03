@@ -21,6 +21,7 @@ class PCI_Admin {
 		add_action( 'admin_post_pci_settings', array( $this, 'handle_settings' ) );
 		add_action( 'admin_post_pci_portal', array( $this, 'handle_portal' ) );
 		add_action( 'wp_ajax_pci_crawl_step', array( $this, 'ajax_crawl_step' ) );
+		add_action( 'wp_ajax_pci_find_missing', array( $this, 'ajax_find_missing' ) );
 		add_action( 'admin_post_pci_catalog_reset', array( $this, 'handle_catalog_reset' ) );
 		add_action( 'admin_post_pci_export', array( $this, 'handle_export' ) );
 		add_action( 'wp_ajax_pci_scrape', array( $this, 'ajax_scrape' ) );
@@ -1295,8 +1296,18 @@ class PCI_Admin {
 			</div>
 		<?php endif; ?>
 
+		<h2 class="pci-section"><?php esc_html_e( 'Option 1 — look up only what you need', 'pci' ); ?></h2>
+		<p><?php esc_html_e( 'The listing page accepts a SKU search, and a search result is still a listing row, so it carries the UPC, prices and category path. This asks SLS about each SKU you are missing, one at a time. Much faster than walking the whole tree when only a few hundred products are wanted.', 'pci' ); ?></p>
 		<p>
-			<button class="button button-primary button-large" id="pci-crawl-start"><?php esc_html_e( 'Start crawling', 'pci' ); ?></button>
+			<button class="button button-primary button-large" id="pci-find-start"><?php esc_html_e( 'Look up missing SKUs', 'pci' ); ?></button>
+			<button class="button" id="pci-find-stop" disabled><?php esc_html_e( 'Stop', 'pci' ); ?></button>
+			<span id="pci-find-status" class="pci-muted"></span>
+		</p>
+
+		<h2 class="pci-section"><?php esc_html_e( 'Option 2 — index the whole catalog', 'pci' ); ?></h2>
+		<p><?php esc_html_e( 'Walks the category tree and indexes everything. Slower, but it builds a complete picture that future reports can be matched against without any further requests.', 'pci' ); ?></p>
+		<p>
+			<button class="button button-large" id="pci-crawl-start"><?php esc_html_e( 'Start crawling', 'pci' ); ?></button>
 			<button class="button" id="pci-crawl-stop" disabled><?php esc_html_e( 'Stop', 'pci' ); ?></button>
 			<span id="pci-crawl-status" class="pci-muted"></span>
 		</p>
@@ -1428,6 +1439,53 @@ class PCI_Admin {
 			});
 			stopb.addEventListener('click', function (e) { e.preventDefault(); running = false; });
 			window.addEventListener('beforeunload', function () { running = false; });
+
+			// Targeted lookup: same log and counters, different endpoint.
+			var fstart = document.getElementById('pci-find-start');
+			var fstop = document.getElementById('pci-find-stop');
+			var fstatus = document.getElementById('pci-find-status');
+			var finding = false;
+
+			function findStep() {
+				if (!finding) { fstatus.textContent = 'Stopped.'; fstart.disabled = false; fstop.disabled = true; return; }
+
+				var body = new FormData();
+				body.append('action', 'pci_find_missing');
+				body.append('_ajax_nonce', nonce);
+
+				fetch(ajaxurl, { method: 'POST', body: body, credentials: 'same-origin' })
+					.then(function (r) { return r.json(); })
+					.then(function (res) {
+						if (!res.success) { fstatus.textContent = res.data || 'Failed'; finding = false; fstart.disabled = false; fstop.disabled = true; return; }
+						var d = res.data;
+						(d.log || []).forEach(function (l) { line(l.ok, l.label, l.message); });
+
+						document.getElementById('pci-cat-total').textContent = d.catalog.total;
+						document.getElementById('pci-cat-upc').textContent = d.catalog.with_upc;
+						document.getElementById('pci-cov-bar').style.width = d.coverage.pct + '%';
+						document.getElementById('pci-cov-text').textContent =
+							d.coverage.have + ' of ' + d.coverage.needed + ' needed SKUs indexed (' + d.coverage.pct + '%)';
+						fstatus.textContent = d.coverage.missing + ' still to look up';
+
+						if (!d.log || !d.log.length) {
+							fstatus.textContent = 'Nothing left to look up.';
+							finding = false; fstart.disabled = false; fstop.disabled = true; return;
+						}
+						findStep();
+					})
+					.catch(function () { fstatus.textContent = 'Request failed. Press again to resume.'; finding = false; fstart.disabled = false; fstop.disabled = true; });
+			}
+
+			fstart.addEventListener('click', function (e) {
+				e.preventDefault();
+				finding = true;
+				fstart.disabled = true;
+				fstop.disabled = false;
+				log.style.display = 'block';
+				fstatus.textContent = 'Looking up…';
+				findStep();
+			});
+			fstop.addEventListener('click', function (e) { e.preventDefault(); finding = false; });
 		})();
 		</script>
 		<?php
@@ -1449,6 +1507,17 @@ class PCI_Admin {
 		}
 
 		wp_send_json_success( PCI_SLS_Catalog::crawl_step( 3 ) );
+	}
+
+	public function ajax_find_missing() {
+		check_ajax_referer( 'pci_crawl' );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_send_json_error( __( 'You do not have permission to do that.', 'pci' ) );
+		}
+
+		@set_time_limit( 120 );
+
+		wp_send_json_success( PCI_SLS_Catalog::find_missing( 5 ) );
 	}
 
 	public function handle_catalog_reset() {
