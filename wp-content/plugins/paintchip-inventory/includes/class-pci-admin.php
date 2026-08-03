@@ -1287,6 +1287,7 @@ class PCI_Admin {
 				<tr><td><?php esc_html_e( 'Pages crawled', 'pci' ); ?></td><td class="num" id="pci-q-done"><?php echo (int) $queue['done']; ?></td></tr>
 				<tr><td><?php esc_html_e( 'Pages still queued', 'pci' ); ?></td><td class="num" id="pci-q-pending"><?php echo (int) $queue['pending']; ?></td></tr>
 				<tr><td><?php esc_html_e( 'Pages that failed', 'pci' ); ?></td><td class="num" id="pci-q-failed"><?php echo (int) $queue['failed']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'Searched, not stocked by SLS', 'pci' ); ?></td><td class="num" id="pci-notfound"><?php echo (int) PCI_SLS_Catalog::not_found_count(); ?></td></tr>
 			</tbody>
 		</table>
 
@@ -1316,6 +1317,7 @@ class PCI_Admin {
 			<?php wp_nonce_field( 'pci_catalog' ); ?>
 			<input type="hidden" name="action" value="pci_catalog_reset">
 			<button class="button button-small" name="mode" value="retry"><?php esc_html_e( 'Retry failed pages', 'pci' ); ?></button>
+			<button class="button button-small" name="mode" value="clear_notfound"><?php esc_html_e( 'Retry not-found SKUs', 'pci' ); ?></button>
 			<button class="button button-small" onclick="return confirm('<?php echo esc_js( __( 'Clear the crawl queue and start the walk again? The indexed products are kept.', 'pci' ) ); ?>');"><?php esc_html_e( 'Reset the queue', 'pci' ); ?></button>
 			<span class="pci-muted"><?php esc_html_e( 'Indexed products are kept; only the list of pages to visit is cleared.', 'pci' ); ?></span>
 		</form>
@@ -1333,12 +1335,22 @@ class PCI_Admin {
 		<?php endif; ?>
 
 		<?php
+		$notfound = PCI_SLS_Catalog::not_found_skus( 300 );
+		if ( ! empty( $notfound ) ) :
+			?>
+			<div class="pci-section">
+				<h2><?php printf( esc_html__( 'Searched, not stocked by SLS (%d)', 'pci' ), PCI_SLS_Catalog::not_found_count() ); ?></h2>
+				<p class="pci-muted"><?php esc_html_e( 'These were looked up and SLS returned nothing. Most likely discontinued, or carried under a code the report no longer matches. They will not be retried unless you clear them.', 'pci' ); ?></p>
+				<p><code style="display:block;padding:10px;background:#fff;border:1px solid #dcdcde;max-height:140px;overflow:auto;"><?php echo esc_html( implode( ', ', $notfound ) ); ?></code></p>
+			</div>
+		<?php endif; ?>
+
+		<?php
 		$missing = PCI_SLS_Catalog::missing_skus( 100 );
 		if ( ! empty( $missing ) ) :
 			?>
 			<div class="pci-section">
-				<h2><?php printf( esc_html__( 'Still not found (%d)', 'pci' ), count( $missing ) ); ?></h2>
-				<p class="pci-muted"><?php esc_html_e( 'SLS SKUs from your report that the crawl has not reached yet. If these remain after the queue empties, they are probably discontinued or listed under a code SLS no longer publishes.', 'pci' ); ?></p>
+				<h2><?php printf( esc_html__( 'Not yet looked up (%d shown)', 'pci' ), count( $missing ) ); ?></h2>
 				<p><code style="display:block;padding:10px;background:#fff;border:1px solid #dcdcde;max-height:140px;overflow:auto;"><?php echo esc_html( implode( ', ', $missing ) ); ?></code></p>
 			</div>
 		<?php endif; ?>
@@ -1465,7 +1477,10 @@ class PCI_Admin {
 						document.getElementById('pci-cov-bar').style.width = d.coverage.pct + '%';
 						document.getElementById('pci-cov-text').textContent =
 							d.coverage.have + ' of ' + d.coverage.needed + ' needed SKUs indexed (' + d.coverage.pct + '%)';
-						fstatus.textContent = d.coverage.missing + ' still to look up';
+						if (d.not_found !== undefined) {
+							document.getElementById('pci-notfound').textContent = d.not_found;
+						}
+						fstatus.textContent = d.coverage.missing + ' still missing, ' + (d.not_found || 0) + ' confirmed not stocked';
 
 						if (!d.log || !d.log.length) {
 							fstatus.textContent = 'Nothing left to look up.';
@@ -1525,6 +1540,12 @@ class PCI_Admin {
 		if ( ! current_user_can( PCI_CAP ) ) {
 			wp_die( esc_html__( 'You do not have permission to do that.', 'pci' ) );
 		}
+		if ( isset( $_POST['mode'] ) && 'clear_notfound' === $_POST['mode'] ) {
+			$n = PCI_SLS_Catalog::clear_not_found();
+			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => sprintf( __( '%d not-found SKUs cleared and will be looked up again.', 'pci' ), $n ) ), admin_url( 'admin.php' ) ) );
+			exit;
+		}
+
 		if ( isset( $_POST['mode'] ) && 'retry' === $_POST['mode'] ) {
 			$n = PCI_SLS_Catalog::retry_failed();
 			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => sprintf( __( '%d failed pages put back on the queue. Press Start.', 'pci' ), $n ) ), admin_url( 'admin.php' ) ) );

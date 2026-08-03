@@ -244,6 +244,58 @@ class PCI_SLS_Catalog {
 	 *
 	 * @return array{ok:bool,message:string,item:array|null}
 	 */
+	/**
+	 * Record that a SKU has been searched for.
+	 *
+	 * Without this, a SKU that SLS cannot find never enters the catalog, so it
+	 * reappears in the next batch of "missing" SKUs and the lookup loop retries
+	 * the same handful forever. The attempt log is what makes progress
+	 * monotonic.
+	 */
+	private static function mark_searched( $sku, $found, $note = '' ) {
+		global $wpdb;
+		$t   = self::crawl_table();
+		$url = self::search_url( $sku );
+
+		$wpdb->query( $wpdb->prepare(
+			"INSERT INTO {$t} (url, url_hash, kind, label, depth, status, message, created_at, crawled_at)
+			 VALUES (%s, %s, 'search', %s, 0, %s, %s, %s, %s)
+			 ON DUPLICATE KEY UPDATE status = VALUES(status), message = VALUES(message), crawled_at = VALUES(crawled_at)",
+			substr( $url, 0, 500 ),
+			sha1( 'search:' . $sku ),
+			substr( $sku, 0, 250 ),
+			$found ? 'done' : 'failed',
+			substr( $note, 0, 250 ),
+			current_time( 'mysql' ),
+			current_time( 'mysql' )
+		) );
+	}
+
+	/** How many SKUs were searched for and genuinely not found at SLS. */
+	public static function not_found_count() {
+		global $wpdb;
+		return (int) $wpdb->get_var(
+			"SELECT COUNT(*) FROM " . self::crawl_table() . " WHERE kind='search' AND status='failed'"
+		);
+	}
+
+	public static function not_found_skus( $limit = 200 ) {
+		global $wpdb;
+		return $wpdb->get_col( $wpdb->prepare(
+			"SELECT label FROM " . self::crawl_table() . "
+			 WHERE kind='search' AND status='failed' ORDER BY label LIMIT %d",
+			(int) $limit
+		) );
+	}
+
+	/** Allow a retry of everything that was not found, e.g. after a fix. */
+	public static function clear_not_found() {
+		global $wpdb;
+		return (int) $wpdb->query(
+			"DELETE FROM " . self::crawl_table() . " WHERE kind='search' AND status='failed'"
+		);
+	}
+
 	public static function find_sku( $sku ) {
 		$sku = trim( (string) $sku );
 		if ( '' === $sku ) {
@@ -255,6 +307,8 @@ class PCI_SLS_Catalog {
 		$html    = PCI_Scraper_SLS::portal_enabled() ? $scraper->portal_get( $url ) : ( new PCI_Http( 'SS' ) )->get( $url );
 
 		if ( is_wp_error( $html ) ) {
+			// A transport failure is not the same as "not stocked", so this is
+			// left unrecorded and will be retried.
 			return array( 'ok' => false, 'message' => $html->get_error_message(), 'item' => null );
 		}
 
@@ -263,6 +317,7 @@ class PCI_SLS_Catalog {
 		foreach ( $parsed['items'] as $item ) {
 			if ( 0 === strcasecmp( $item['sku'], $sku ) ) {
 				self::index_items( array( $item ) );
+				self::mark_searched( $sku, true );
 				return array(
 					'ok'      => true,
 					'message' => sprintf( __( 'Found: %s', 'pci' ), $item['title'] ),
@@ -274,14 +329,17 @@ class PCI_SLS_Catalog {
 		// A search can legitimately return near matches; index them anyway.
 		if ( ! empty( $parsed['items'] ) ) {
 			self::index_items( $parsed['items'] );
+			self::mark_searched( $sku, false, sprintf( '%d near matches, no exact', count( $parsed['items'] ) ) );
 			return array(
 				'ok'      => false,
-				'message' => sprintf( __( 'Search returned %d products but none matched exactly.', 'pci' ), count( $parsed['items'] ) ),
+				'message' => sprintf( __( '%d products returned but none matched exactly — indexed anyway.', 'pci' ), count( $parsed['items'] ) ),
 				'item'    => null,
 			);
 		}
 
-		return array( 'ok' => false, 'message' => __( 'No product found for that SKU.', 'pci' ), 'item' => null );
+		self::mark_searched( $sku, false, 'no results' );
+
+		return array( 'ok' => false, 'message' => __( 'SLS returned no product for that SKU.', 'pci' ), 'item' => null );
 	}
 
 	/**
@@ -300,10 +358,11 @@ class PCI_SLS_Catalog {
 		}
 
 		return array(
-			'log'      => $log,
-			'catalog'  => self::stats(),
-			'coverage' => self::coverage(),
-			'queue'    => self::queue_stats(),
+			'log'       => $log,
+			'catalog'   => self::stats(),
+			'coverage'  => self::coverage(),
+			'queue'     => self::queue_stats(),
+			'not_found' => self::not_found_count(),
 		);
 	}
 
@@ -673,10 +732,16 @@ class PCI_SLS_Catalog {
 		$items = PCI_Schema::table( 'items' );
 		$cat   = self::table();
 
+		$crawl = self::crawl_table();
+
+		// Exclude SKUs already searched for, or the loop retries the same
+		// failures indefinitely and never advances.
 		return $wpdb->get_col( $wpdb->prepare(
 			"SELECT DISTINCT i.sku FROM {$items} i
 			 LEFT JOIN {$cat} c ON c.sku = i.sku
-			 WHERE i.action = %s AND i.vend = 'SS' AND c.id IS NULL AND i.sku <> ''
+			 LEFT JOIN {$crawl} s ON s.kind = 'search' AND s.label = i.sku
+			 WHERE i.action = %s AND i.vend = 'SS' AND c.id IS NULL
+			   AND s.id IS NULL AND i.sku <> ''
 			 ORDER BY i.sku LIMIT %d",
 			PCI_Classifier::NEW_P,
 			(int) $limit
