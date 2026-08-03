@@ -329,9 +329,15 @@ class PCI_SLS_Catalog {
 		$html    = PCI_Scraper_SLS::portal_enabled() ? $scraper->portal_get( $url ) : ( new PCI_Http( 'SS' ) )->get( $url );
 
 		if ( is_wp_error( $html ) ) {
-			// A transport failure is not the same as "not stocked", so this is
-			// left unrecorded and will be retried.
-			return array( 'ok' => false, 'message' => $html->get_error_message(), 'item' => null );
+			// A transport failure is not the same as "not stocked", so it is
+			// left unrecorded and will be retried — but it is flagged so the
+			// caller can stop rather than loop on an unreachable server.
+			return array(
+				'ok'              => false,
+				'message'         => $html->get_error_message(),
+				'item'            => null,
+				'transport_error' => true,
+			);
 		}
 
 		$parsed = self::parse_listing( $html );
@@ -351,6 +357,19 @@ class PCI_SLS_Catalog {
 		}
 
 		if ( 0 === $n ) {
+			// An expired session returns a login page, which parses as zero
+			// products. Marking that "not stocked" would quietly condemn good
+			// products, so the session is verified before accepting the result.
+			if ( PCI_Scraper_SLS::portal_enabled() && PCI_Scraper_SLS::looks_logged_out( $html ) ) {
+				return array(
+					'ok'         => false,
+					'message'    => __( 'The portal session had expired — not recorded, will retry.', 'pci' ),
+					'item'       => null,
+					'candidates' => array(),
+					'transport'  => true,
+				);
+			}
+
 			self::mark_searched( $sku, false, 'no results' );
 			return array( 'ok' => false, 'message' => __( 'SLS returned no product for that code.', 'pci' ), 'item' => null, 'candidates' => array() );
 		}
@@ -464,13 +483,45 @@ class PCI_SLS_Catalog {
 	 * @return array
 	 */
 	public static function find_missing( $limit = 5 ) {
-		$skus = self::missing_skus( $limit );
-		$log  = array();
+		$log     = array();
+		$stopped = false;
 
-		foreach ( $skus as $sku ) {
-			$res   = self::find_sku( $sku );
+		if ( self::circuit_open() ) {
+			return array(
+				'log'       => array( array( 'ok' => false, 'label' => __( 'Paused', 'pci' ),
+					'message' => __( 'SLS stopped responding. Nothing further will be tried until you reset this.', 'pci' ) ) ),
+				'catalog'   => self::stats(),
+				'coverage'  => self::coverage(),
+				'queue'     => self::queue_stats(),
+				'not_found' => self::not_found_count(),
+				'stopped'   => true,
+			);
+		}
+
+		foreach ( self::missing_skus( $limit ) as $sku ) {
+			$res = self::find_sku( $sku );
+
+			// Tell a transport failure apart from a real answer. Only the
+			// former should ever stop the run.
+			$transport = ( ! $res['ok'] && ! empty( $res['transport_error'] ) );
+			self::note_transport( $transport );
+
 			$log[] = array( 'ok' => $res['ok'], 'label' => $sku, 'message' => $res['message'] );
-			usleep( 400000 );
+
+			if ( $transport && self::circuit_open() ) {
+				$log[]   = array(
+					'ok'      => false,
+					'label'   => __( 'Stopped', 'pci' ),
+					'message' => sprintf(
+						__( '%d requests in a row failed to reach SLS. Stopping so a temporary block does not become a permanent one. Try again later.', 'pci' ),
+						self::FAIL_LIMIT
+					),
+				);
+				$stopped = true;
+				break;
+			}
+
+			self::pause();
 		}
 
 		return array(
@@ -479,6 +530,7 @@ class PCI_SLS_Catalog {
 			'coverage'  => self::coverage(),
 			'queue'     => self::queue_stats(),
 			'not_found' => self::not_found_count(),
+			'stopped'   => $stopped,
 		);
 	}
 
@@ -630,6 +682,55 @@ class PCI_SLS_Catalog {
 		);
 	}
 
+	const OPT_DELAY_MS   = 'pci_sls_delay_ms';
+	const OPT_FAIL_STREAK = 'pci_sls_fail_streak';
+
+	/** Pause between requests. Deliberately generous: this is someone else's
+	 *  ageing IIS box and being blocked costs far more than being slow. */
+	public static function delay_ms() {
+		return max( 250, min( 10000, (int) get_option( self::OPT_DELAY_MS, 2500 ) ) );
+	}
+
+	private static function pause() {
+		usleep( self::delay_ms() * 1000 );
+	}
+
+	public static function fail_streak() {
+		return (int) get_option( self::OPT_FAIL_STREAK, 0 );
+	}
+
+	private static function note_transport( $failed ) {
+		if ( $failed ) {
+			update_option( self::OPT_FAIL_STREAK, self::fail_streak() + 1, false );
+		} else {
+			update_option( self::OPT_FAIL_STREAK, 0, false );
+		}
+	}
+
+	public static function clear_fail_streak() {
+		update_option( self::OPT_FAIL_STREAK, 0, false );
+	}
+
+	/** Consecutive transport failures that stop a run. */
+	const FAIL_LIMIT = 3;
+
+	public static function circuit_open() {
+		return self::fail_streak() >= self::FAIL_LIMIT;
+	}
+
+	/** Is SLS answering at all? */
+	public static function connectivity_check() {
+		$res = wp_remote_get( self::BASE, array( 'timeout' => 20, 'user-agent' => 'ThePaintChip-InventorySync/1.6' ) );
+		if ( is_wp_error( $res ) ) {
+			return array( 'ok' => false, 'message' => $res->get_error_message() );
+		}
+		$code = (int) wp_remote_retrieve_response_code( $res );
+		return array(
+			'ok'      => ( $code > 0 && $code < 500 ),
+			'message' => sprintf( __( 'HTTP %d from slsarts.com', 'pci' ), $code ),
+		);
+	}
+
 	public static function crawl_table() {
 		global $wpdb;
 		return $wpdb->prefix . 'pci_crawl';
@@ -736,15 +837,26 @@ class PCI_SLS_Catalog {
 				: ( new PCI_Http( 'SS' ) )->get( $row->url );
 
 			if ( is_wp_error( $html ) ) {
+				// Back to pending, not failed: an unreachable server is not a
+				// bad URL and should be retried once it recovers.
 				$wpdb->update( $t, array(
-					'status'     => 'failed',
+					'status'     => 'pending',
 					'message'    => substr( $html->get_error_message(), 0, 250 ),
 					'crawled_at' => current_time( 'mysql' ),
 				), array( 'id' => (int) $row->id ) );
 
+				self::note_transport( true );
 				$log[] = array( 'ok' => false, 'label' => $row->label ? $row->label : $row->url, 'message' => $html->get_error_message() );
+
+				if ( self::circuit_open() ) {
+					$log[] = array( 'ok' => false, 'label' => __( 'Stopped', 'pci' ),
+						'message' => __( 'SLS stopped responding. Pausing so a temporary block does not become permanent.', 'pci' ) );
+					break;
+				}
 				continue;
 			}
+
+			self::note_transport( false );
 
 			$parsed = self::parse_listing( $html );
 			$found  = count( $parsed['items'] );
@@ -802,8 +914,7 @@ class PCI_SLS_Catalog {
 					: ( $diagnostic ? $diagnostic : sprintf( __( 'directory — %d links queued', 'pci' ), $queued ) ),
 			);
 
-			// Ancient IIS box; do not hammer it.
-			usleep( 500000 );
+			self::pause();
 		}
 
 		return array(
@@ -811,6 +922,7 @@ class PCI_SLS_Catalog {
 			'queue'    => self::queue_stats(),
 			'catalog'  => self::stats(),
 			'coverage' => self::coverage(),
+			'stopped'  => self::circuit_open(),
 		);
 	}
 

@@ -1305,6 +1305,17 @@ class PCI_Admin {
 			<span id="pci-find-status" class="pci-muted"></span>
 		</p>
 
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-bottom:1em;">
+			<?php wp_nonce_field( 'pci_catalog' ); ?>
+			<input type="hidden" name="action" value="pci_catalog_reset">
+			<label><?php esc_html_e( 'Pause between requests:', 'pci' ); ?>
+				<input type="number" name="delay" min="250" max="10000" step="250" value="<?php echo esc_attr( PCI_SLS_Catalog::delay_ms() ); ?>" class="small-text"> ms
+			</label>
+			<button class="button button-small" name="mode" value="save_delay"><?php esc_html_e( 'Save', 'pci' ); ?></button>
+			<button class="button button-small" name="mode" value="ping"><?php esc_html_e( 'Test the connection', 'pci' ); ?></button>
+			<span class="pci-muted"><?php esc_html_e( 'Slower is safer. The run halts by itself if SLS stops responding three times running.', 'pci' ); ?></span>
+		</form>
+
 		<h2 class="pci-section"><?php esc_html_e( 'Option 2 — index the whole catalog', 'pci' ); ?></h2>
 		<p><?php esc_html_e( 'Walks the category tree and indexes everything. Slower, but it builds a complete picture that future reports can be matched against without any further requests.', 'pci' ); ?></p>
 		<p>
@@ -1548,6 +1559,11 @@ class PCI_Admin {
 						}
 						fstatus.textContent = d.coverage.missing + ' still missing, ' + (d.not_found || 0) + ' confirmed not stocked';
 
+						if (d.aborted) {
+							fstatus.textContent = d.abort_msg || 'Stopped — SLS is not responding.';
+							line(false, 'Stopped', d.abort_msg || '');
+							finding = false; fstart.disabled = false; fstop.disabled = true; return;
+						}
 						if (!d.log || !d.log.length) {
 							fstatus.textContent = 'Nothing left to look up.';
 							finding = false; fstart.disabled = false; fstop.disabled = true; return;
@@ -1598,7 +1614,7 @@ class PCI_Admin {
 
 		@set_time_limit( 120 );
 
-		wp_send_json_success( PCI_SLS_Catalog::find_missing( 5 ) );
+		wp_send_json_success( PCI_SLS_Catalog::find_missing( 3 ) );
 	}
 
 	public function handle_catalog_reset() {
@@ -1606,19 +1622,44 @@ class PCI_Admin {
 		if ( ! current_user_can( PCI_CAP ) ) {
 			wp_die( esc_html__( 'You do not have permission to do that.', 'pci' ) );
 		}
-		if ( isset( $_POST['mode'] ) && 'purge_junk' === $_POST['mode'] ) {
+		$mode = isset( $_POST['mode'] ) ? sanitize_key( $_POST['mode'] ) : '';
+
+		if ( 'save_delay' === $mode ) {
+			update_option( PCI_SLS_Catalog::OPT_DELAY_MS, max( 250, min( 10000, (int) $_POST['delay'] ) ) );
+			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => __( 'Pause saved.', 'pci' ) ), admin_url( 'admin.php' ) ) );
+			exit;
+		}
+
+		if ( 'ping' === $mode ) {
+			$t0   = microtime( true );
+			$body = ( new PCI_Http( 'SS' ) )->get( PCI_SLS_Catalog::BASE );
+			$ms   = round( ( microtime( true ) - $t0 ) * 1000 );
+
+			$msg = is_wp_error( $body )
+				? sprintf( __( 'No answer from SLS after %1$dms: %2$s', 'pci' ), $ms, $body->get_error_message() )
+				: sprintf( __( 'SLS answered in %1$dms with %2$d bytes. Safe to run.', 'pci' ), $ms, strlen( $body ) );
+
+			wp_safe_redirect( add_query_arg( array(
+				'page'     => self::SLUG . '-catalog',
+				'pci_msg'  => $msg,
+				'pci_type' => is_wp_error( $body ) ? 'error' : 'success',
+			), admin_url( 'admin.php' ) ) );
+			exit;
+		}
+
+		if ( 'purge_junk' === $mode ) {
 			$n = PCI_SLS_Catalog::purge_junk();
 			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => sprintf( __( '%d empty index rows removed.', 'pci' ), $n ) ), admin_url( 'admin.php' ) ) );
 			exit;
 		}
 
-		if ( isset( $_POST['mode'] ) && 'clear_notfound' === $_POST['mode'] ) {
+		if ( 'clear_notfound' === $mode ) {
 			$n = PCI_SLS_Catalog::clear_not_found();
 			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => sprintf( __( '%d not-found SKUs cleared and will be looked up again.', 'pci' ), $n ) ), admin_url( 'admin.php' ) ) );
 			exit;
 		}
 
-		if ( isset( $_POST['mode'] ) && 'retry' === $_POST['mode'] ) {
+		if ( 'retry' === $mode ) {
 			$n = PCI_SLS_Catalog::retry_failed();
 			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => sprintf( __( '%d failed pages put back on the queue. Press Start.', 'pci' ), $n ) ), admin_url( 'admin.php' ) ) );
 			exit;
