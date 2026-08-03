@@ -1334,6 +1334,46 @@ class PCI_Admin {
 			</div>
 		<?php endif; ?>
 
+		<?php $diag = PCI_SLS_Catalog::format_diagnostic( 12 ); ?>
+		<div class="pci-section">
+			<h2><?php esc_html_e( 'Do the SKUs line up?', 'pci' ); ?></h2>
+			<p class="pci-muted"><?php esc_html_e( 'If the index grows while coverage does not, the two sides are not using the same codes. These are real examples from each.', 'pci' ); ?></p>
+			<table class="widefat striped" style="max-width:900px;">
+				<tbody>
+					<tr>
+						<th style="width:220px;"><?php esc_html_e( 'Wanted (from your report)', 'pci' ); ?></th>
+						<td><code><?php echo esc_html( implode( ', ', $diag['wanted'] ) ); ?></code></td>
+					</tr>
+					<tr>
+						<th><?php esc_html_e( 'Indexed (from SLS)', 'pci' ); ?></th>
+						<td><code><?php echo esc_html( implode( ', ', $diag['indexed'] ) ); ?></code></td>
+					</tr>
+					<tr>
+						<th><?php esc_html_e( 'Matched exactly', 'pci' ); ?></th>
+						<td><code><?php echo $diag['matched'] ? esc_html( implode( ', ', $diag['matched'] ) ) : '—'; ?></code></td>
+					</tr>
+					<tr>
+						<th><?php esc_html_e( 'Would match ignoring case and dashes', 'pci' ); ?></th>
+						<td><strong><?php echo (int) $diag['loose_match']; ?></strong>
+							<span class="pci-muted"><?php esc_html_e( 'if this is much higher than the exact count, the fix is normalisation rather than more crawling.', 'pci' ); ?></span></td>
+					</tr>
+					<tr>
+						<th><?php esc_html_e( 'Index rows with no data', 'pci' ); ?></th>
+						<td><strong><?php echo (int) $diag['junk_rows']; ?></strong>
+							<span class="pci-muted"><?php esc_html_e( 'rows holding only a SKU — no title, no UPC.', 'pci' ); ?></span>
+							<?php if ( $diag['junk_rows'] > 0 ) : ?>
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+									<?php wp_nonce_field( 'pci_catalog' ); ?>
+									<input type="hidden" name="action" value="pci_catalog_reset">
+									<button class="button button-small" name="mode" value="purge_junk"><?php esc_html_e( 'Remove them', 'pci' ); ?></button>
+								</form>
+							<?php endif; ?>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
 		<?php
 		$notfound = PCI_SLS_Catalog::not_found_skus( 300 );
 		if ( ! empty( $notfound ) ) :
@@ -1540,6 +1580,12 @@ class PCI_Admin {
 		if ( ! current_user_can( PCI_CAP ) ) {
 			wp_die( esc_html__( 'You do not have permission to do that.', 'pci' ) );
 		}
+		if ( isset( $_POST['mode'] ) && 'purge_junk' === $_POST['mode'] ) {
+			$n = PCI_SLS_Catalog::purge_junk();
+			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => sprintf( __( '%d empty index rows removed.', 'pci' ), $n ) ), admin_url( 'admin.php' ) ) );
+			exit;
+		}
+
 		if ( isset( $_POST['mode'] ) && 'clear_notfound' === $_POST['mode'] ) {
 			$n = PCI_SLS_Catalog::clear_not_found();
 			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => sprintf( __( '%d not-found SKUs cleared and will be looked up again.', 'pci' ), $n ) ), admin_url( 'admin.php' ) ) );
