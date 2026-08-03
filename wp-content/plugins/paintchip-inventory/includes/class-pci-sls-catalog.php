@@ -335,46 +335,127 @@ class PCI_SLS_Catalog {
 		}
 
 		$parsed = self::parse_listing( $html );
+		$n      = count( $parsed['items'] );
 
+		// A search with no hits returns a capped default listing rather than an
+		// empty page, so a large result set means "not stocked", not "many
+		// matches".
+		if ( $n > 25 ) {
+			self::mark_searched( $sku, false, sprintf( 'no match — default listing of %d returned', $n ) );
+			return array(
+				'ok'      => false,
+				'message' => __( 'SLS has no product matching that code.', 'pci' ),
+				'item'    => null,
+				'candidates' => array(),
+			);
+		}
+
+		if ( 0 === $n ) {
+			self::mark_searched( $sku, false, 'no results' );
+			return array( 'ok' => false, 'message' => __( 'SLS returned no product for that code.', 'pci' ), 'item' => null, 'candidates' => array() );
+		}
+
+		// Everything returned is a real product, so index it regardless.
+		self::index_items( $parsed['items'] );
+
+		// Exact match wins.
 		foreach ( $parsed['items'] as $item ) {
 			if ( 0 === strcasecmp( $item['sku'], $sku ) ) {
-				self::index_items( array( $item ) );
-				self::mark_searched( $sku, true );
+				self::mark_searched( $sku, true, 'exact' );
 				return array(
 					'ok'      => true,
 					'message' => sprintf( __( 'Found: %s', 'pci' ), $item['title'] ),
 					'item'    => $item,
+					'candidates' => array(),
 				);
 			}
 		}
 
-		// A search that misses returns a broad listing rather than an empty
-		// page, so indexing those rows buries the index in products nobody
-		// asked for. Only a small, plausibly-relevant result set is kept.
-		$n = count( $parsed['items'] );
+		// The report often carries a shortened form of the supplier code —
+		// MTEX014P for MTEX014PM9010 — so a SKU that is a prefix of exactly one
+		// catalog entry is safe to accept. Several prefix hits are ambiguous
+		// and are left for a person to resolve.
+		$prefix = array();
+		foreach ( $parsed['items'] as $item ) {
+			if ( 0 === stripos( $item['sku'], $sku ) ) {
+				$prefix[] = $item;
+			}
+		}
 
-		if ( $n > 0 && $n <= 25 ) {
-			self::index_items( $parsed['items'] );
-			self::mark_searched( $sku, false, sprintf( '%d near matches, no exact', $n ) );
+		if ( 1 === count( $prefix ) ) {
+			self::record_alias( $sku, $prefix[0]['sku'] );
+			self::mark_searched( $sku, true, 'prefix: ' . $prefix[0]['sku'] );
 			return array(
-				'ok'      => false,
-				'message' => sprintf( __( '%d near matches indexed, but none was %s exactly.', 'pci' ), $n, $sku ),
-				'item'    => null,
+				'ok'      => true,
+				'message' => sprintf( __( 'Matched %1$s to %2$s — %3$s', 'pci' ), $sku, $prefix[0]['sku'], $prefix[0]['title'] ),
+				'item'    => $prefix[0],
+				'candidates' => array(),
 			);
 		}
 
-		if ( $n > 25 ) {
-			self::mark_searched( $sku, false, sprintf( 'search returned %d rows, treated as no match', $n ) );
+		if ( count( $prefix ) > 1 ) {
+			$codes = array();
+			foreach ( $prefix as $p ) {
+				$codes[] = $p['sku'];
+			}
+			self::mark_searched( $sku, false, 'ambiguous: ' . implode( ' ', $codes ) );
 			return array(
 				'ok'      => false,
-				'message' => sprintf( __( 'Search returned %d unrelated products — treated as not found.', 'pci' ), $n ),
+				'message' => sprintf( __( '%1$d products start with %2$s: %3$s — needs a decision.', 'pci' ), count( $prefix ), $sku, implode( ', ', $codes ) ),
 				'item'    => null,
+				'candidates' => $codes,
 			);
 		}
 
-		self::mark_searched( $sku, false, 'no results' );
+		$codes = array();
+		foreach ( $parsed['items'] as $p ) {
+			$codes[] = $p['sku'];
+		}
+		self::mark_searched( $sku, false, 'related only: ' . implode( ' ', array_slice( $codes, 0, 6 ) ) );
 
-		return array( 'ok' => false, 'message' => __( 'SLS returned no product for that SKU.', 'pci' ), 'item' => null );
+		return array(
+			'ok'      => false,
+			'message' => sprintf( __( '%1$d related products indexed but none begins with %2$s: %3$s', 'pci' ), $n, $sku, implode( ', ', array_slice( $codes, 0, 6 ) ) ),
+			'item'    => null,
+			'candidates' => $codes,
+		);
+	}
+
+	/**
+	 * Remember that a report code maps to a longer supplier code.
+	 *
+	 * Stored as a second catalog row under the report's own SKU, so the plain
+	 * join used everywhere else keeps working without special cases.
+	 */
+	public static function record_alias( $report_sku, $supplier_sku ) {
+		global $wpdb;
+		$t   = self::table();
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$t} WHERE sku = %s", $supplier_sku ), ARRAY_A );
+
+		if ( ! $row ) {
+			return false;
+		}
+
+		$raw = json_decode( (string) $row['raw'], true );
+		if ( ! is_array( $raw ) ) {
+			$raw = array();
+		}
+		$raw['alias_of']     = $supplier_sku;
+		$raw['report_sku']   = $report_sku;
+
+		unset( $row['id'] );
+		$row['sku']        = $report_sku;
+		$row['raw']        = wp_json_encode( $raw );
+		$row['updated_at'] = current_time( 'mysql' );
+
+		$exists = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$t} WHERE sku = %s", $report_sku ) );
+		if ( $exists ) {
+			$wpdb->update( $t, $row, array( 'sku' => $report_sku ) );
+		} else {
+			$wpdb->insert( $t, $row );
+		}
+
+		return true;
 	}
 
 	/**

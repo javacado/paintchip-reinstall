@@ -1375,6 +1375,32 @@ class PCI_Admin {
 		</div>
 
 		<?php
+		global $wpdb;
+		$amb = $wpdb->get_results(
+			"SELECT label, message FROM " . PCI_SLS_Catalog::crawl_table() . "
+			 WHERE kind='search' AND status='failed' AND message LIKE 'ambiguous:%'
+			 ORDER BY label LIMIT 100"
+		);
+		if ( ! empty( $amb ) ) :
+			?>
+			<div class="pci-section">
+				<h2><?php printf( esc_html__( 'Needs a decision (%d)', 'pci' ), count( $amb ) ); ?></h2>
+				<p class="pci-muted"><?php esc_html_e( 'The report holds a shortened code that matches more than one SLS product. Picking the right one is a judgement call, so nothing has been assumed.', 'pci' ); ?></p>
+				<table class="widefat striped" style="max-width:820px;">
+					<thead><tr><th><?php esc_html_e( 'Report code', 'pci' ); ?></th><th><?php esc_html_e( 'SLS products that start with it', 'pci' ); ?></th></tr></thead>
+					<tbody>
+					<?php foreach ( $amb as $a ) : ?>
+						<tr>
+							<td><code><?php echo esc_html( $a->label ); ?></code></td>
+							<td><code><?php echo esc_html( trim( str_replace( 'ambiguous:', '', $a->message ) ) ); ?></code></td>
+						</tr>
+					<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
+		<?php endif; ?>
+
+		<?php
 		$notfound = PCI_SLS_Catalog::not_found_skus( 300 );
 		if ( ! empty( $notfound ) ) :
 			?>
