@@ -20,6 +20,7 @@ class PCI_Admin {
 		add_action( 'admin_post_pci_rollback', array( $this, 'handle_rollback' ) );
 		add_action( 'admin_post_pci_settings', array( $this, 'handle_settings' ) );
 		add_action( 'admin_post_pci_portal', array( $this, 'handle_portal' ) );
+		add_action( 'admin_post_pci_sls_import', array( $this, 'handle_sls_import' ) );
 		add_action( 'wp_ajax_pci_crawl_step', array( $this, 'ajax_crawl_step' ) );
 		add_action( 'wp_ajax_pci_find_missing', array( $this, 'ajax_find_missing' ) );
 		add_action( 'wp_ajax_pci_page_catalog', array( $this, 'ajax_page_catalog' ) );
@@ -1270,6 +1271,22 @@ class PCI_Admin {
 		<h1><?php esc_html_e( 'SLS catalog index', 'pci' ); ?></h1>
 
 		<div class="pci-note">
+			<p><strong><?php esc_html_e( 'The quickest route: upload their own export.', 'pci' ); ?></strong>
+			<?php esc_html_e( 'In the SLS portal, drill down to a category and press "Download Detail". That file holds everything — SKU, description, UPCs, MSRP, dealer price, the full category path, brand, stock at both warehouses, weights and dimensions. Downloading it in your browser uses your normal session, so there is no rate limiting to work around.', 'pci' ); ?></p>
+		</div>
+
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" enctype="multipart/form-data" style="margin:1em 0;padding:14px;background:#fff;border:1px solid #dcdcde;max-width:900px;">
+			<?php wp_nonce_field( 'pci_sls_import' ); ?>
+			<input type="hidden" name="action" value="pci_sls_import">
+			<p><strong><?php esc_html_e( 'Import Download Detail exports', 'pci' ); ?></strong></p>
+			<p>
+				<input type="file" name="pci_export[]" accept=".xlsx,.csv,.txt" multiple>
+				<button class="button button-primary"><?php esc_html_e( 'Import', 'pci' ); ?></button>
+			</p>
+			<p class="pci-muted"><?php esc_html_e( 'Several files can be selected at once. Re-importing is safe — existing products are updated rather than duplicated.', 'pci' ); ?></p>
+		</form>
+
+		<div class="pci-note">
 			<p><?php esc_html_e( 'The SLS item page carries almost nothing. The category listings carry everything — UPC, MSRP, dealer net, stock and a full-size image, one row per product. This walks the category tree on its own, indexing every listing it finds, so sourcing becomes a local lookup instead of a request per product.', 'pci' ); ?></p>
 			<p><?php esc_html_e( 'Nothing to paste. Press Start and it works through the tree, pausing between requests. Safe to stop and resume — it picks up where it left off.', 'pci' ); ?></p>
 		</div>
@@ -1738,6 +1755,72 @@ class PCI_Admin {
 		@set_time_limit( 180 );
 
 		wp_send_json_success( PCI_SLS_Catalog::page_catalog( 3 ) );
+	}
+
+	public function handle_sls_import() {
+		check_admin_referer( 'pci_sls_import' );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to import.', 'pci' ) );
+		}
+
+		@set_time_limit( 300 );
+
+		if ( empty( $_FILES['pci_export']['name'][0] ) ) {
+			$this->redirect_catalog( __( 'No file was chosen.', 'pci' ), 'error' );
+		}
+
+		$added   = 0;
+		$updated = 0;
+		$files   = 0;
+		$errors  = array();
+		$paths   = array();
+
+		$count = count( $_FILES['pci_export']['name'] );
+
+		for ( $i = 0; $i < $count; $i++ ) {
+			$tmp  = $_FILES['pci_export']['tmp_name'][ $i ];
+			$name = sanitize_file_name( $_FILES['pci_export']['name'][ $i ] );
+
+			if ( ! $tmp || ! is_uploaded_file( $tmp ) ) {
+				continue;
+			}
+
+			$res = PCI_SLS_Import::import_file( $tmp, $name );
+
+			if ( empty( $res['ok'] ) ) {
+				$errors[] = $name . ': ' . $res['message'];
+				continue;
+			}
+
+			$files++;
+			$added   += $res['added'];
+			$updated += $res['updated'];
+			$paths    = array_merge( $paths, $res['categories'] );
+		}
+
+		$msg = sprintf(
+			/* translators: 1: files, 2: new, 3: updated, 4: categories */
+			__( '%1$d files imported: %2$d new products, %3$d updated, across %4$d categories.', 'pci' ),
+			$files,
+			$added,
+			$updated,
+			count( array_unique( $paths ) )
+		);
+
+		if ( $errors ) {
+			$msg .= ' ' . $errors[0];
+		}
+
+		$this->redirect_catalog( $msg, $files ? 'success' : 'error' );
+	}
+
+	private function redirect_catalog( $msg, $type = 'success' ) {
+		wp_safe_redirect( add_query_arg( array(
+			'page'     => self::SLUG . '-catalog',
+			'pci_msg'  => $msg,
+			'pci_type' => $type,
+		), admin_url( 'admin.php' ) ) );
+		exit;
 	}
 
 	public function handle_catalog_reset() {

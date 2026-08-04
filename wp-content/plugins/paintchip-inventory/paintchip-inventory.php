@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Paint Chip Inventory Sync
  * Description: Imports the POS "General Inventory Full Master List" report, previews every change before it lands, applies stock through WooCommerce CRUD, and can roll the whole batch back.
- * Version:     1.8.2
+ * Version:     1.9.0
  * Requires PHP: 7.4
  * Author:      The Paint Chip
  * Text Domain: pci
@@ -10,7 +10,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PCI_VERSION', '1.8.2' );
+define( 'PCI_VERSION', '1.9.0' );
 define( 'PCI_FILE', __FILE__ );
 define( 'PCI_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PCI_URL', plugin_dir_url( __FILE__ ) );
@@ -32,6 +32,7 @@ require_once PCI_DIR . 'includes/scrapers/interface-pci-scraper.php';
 require_once PCI_DIR . 'includes/scrapers/class-pci-scraper-registry.php';
 require_once PCI_DIR . 'includes/scrapers/class-pci-scraper-sls.php';
 require_once PCI_DIR . 'includes/class-pci-sls-catalog.php';
+require_once PCI_DIR . 'includes/class-pci-sls-import.php';
 require_once PCI_DIR . 'includes/class-pci-admin.php';
 
 register_activation_hook( __FILE__, array( 'PCI_Schema', 'install' ) );
