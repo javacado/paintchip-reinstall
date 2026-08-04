@@ -21,6 +21,8 @@ class PCI_Admin {
 		add_action( 'admin_post_pci_settings', array( $this, 'handle_settings' ) );
 		add_action( 'admin_post_pci_portal', array( $this, 'handle_portal' ) );
 		add_action( 'admin_post_pci_sls_import', array( $this, 'handle_sls_import' ) );
+		add_action( 'admin_post_pci_categories', array( $this, 'handle_categories' ) );
+		add_action( 'admin_post_pci_refetch', array( $this, 'handle_refetch' ) );
 		add_action( 'wp_ajax_pci_crawl_step', array( $this, 'ajax_crawl_step' ) );
 		add_action( 'wp_ajax_pci_find_missing', array( $this, 'ajax_find_missing' ) );
 		add_action( 'wp_ajax_pci_page_catalog', array( $this, 'ajax_page_catalog' ) );
@@ -48,6 +50,7 @@ class PCI_Admin {
 		add_submenu_page( self::SLUG, __( 'Batches', 'pci' ), __( 'Batches', 'pci' ), PCI_CAP, self::SLUG, array( $this, 'route' ) );
 		add_submenu_page( self::SLUG, __( 'Suppliers', 'pci' ), __( 'Suppliers', 'pci' ), PCI_CAP, self::SLUG . '-suppliers', array( $this, 'route_suppliers' ) );
 		add_submenu_page( self::SLUG, __( 'SLS catalog', 'pci' ), __( 'SLS catalog', 'pci' ), PCI_CAP, self::SLUG . '-catalog', array( $this, 'route_catalog' ) );
+		add_submenu_page( self::SLUG, __( 'Categories', 'pci' ), __( 'Categories', 'pci' ), PCI_CAP, self::SLUG . '-categories', array( $this, 'route_categories' ) );
 		add_submenu_page( self::SLUG, __( 'Portal setup', 'pci' ), __( 'Portal setup', 'pci' ), PCI_CAP, self::SLUG . '-portal', array( $this, 'route_portal' ) );
 		add_submenu_page( self::SLUG, __( 'Settings', 'pci' ), __( 'Settings', 'pci' ), PCI_CAP, self::SLUG . '-settings', array( $this, 'route_settings' ) );
 	}
@@ -938,6 +941,15 @@ class PCI_Admin {
 				<p><?php esc_html_e( 'No Barcode Spider token is set, so products whose supplier image is missing or too small will be created without one. Add a token under Settings to enable the UPC image fallback.', 'pci' ); ?></p>
 			</div>
 		<?php endif; ?>
+
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:1em 0;">
+			<?php wp_nonce_field( 'pci_refetch_' . $run_id ); ?>
+			<input type="hidden" name="action" value="pci_refetch">
+			<input type="hidden" name="run" value="<?php echo (int) $run_id; ?>">
+			<button class="button button-small"><?php esc_html_e( 'Retry the ones that failed', 'pci' ); ?></button>
+			<button class="button button-small" name="all" value="1" onclick="return confirm('<?php echo esc_js( __( 'Clear every fetched result for this batch and start again?', 'pci' ) ); ?>');"><?php esc_html_e( 'Fetch everything again', 'pci' ); ?></button>
+			<span class="pci-muted"><?php esc_html_e( 'Use this after the catalog index has changed — a row that already has a result, even a failure, is never retried.', 'pci' ); ?></span>
+		</form>
 
 		<p>
 			<button class="button button-primary" id="pci-fetch-batch" data-run="<?php echo (int) $run_id; ?>" <?php disabled( 0, (int) $c['pending'] ); ?>>
@@ -1898,6 +1910,138 @@ class PCI_Admin {
 		PCI_SLS_Catalog::reset_queue();
 		wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => __( 'Crawl queue cleared. Press Start to walk the tree again.', 'pci' ) ), admin_url( 'admin.php' ) ) );
 		exit;
+	}
+
+	// -------------------------------------------------------- category screen
+
+	public function route_categories() {
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to view this page.', 'pci' ) );
+		}
+
+		$needed_only = ! isset( $_GET['all'] );
+		$paths       = PCI_Categories::paths( $needed_only );
+		$map         = PCI_Categories::map();
+		$choices     = PCI_Categories::term_choices();
+		$stats       = PCI_Categories::stats( $needed_only );
+
+		echo '<div class="wrap">';
+		$this->notices();
+		?>
+		<h1><?php esc_html_e( 'Category mapping', 'pci' ); ?></h1>
+
+		<div class="pci-note">
+			<p><?php esc_html_e( 'Your category tree was built from SLS\'s, but the two have drifted and the depths do not correspond — SLS puts the brand at level 3 in one branch and level 4 in another. Rather than guess, each path is decided once here and remembered.', 'pci' ); ?></p>
+			<p><?php esc_html_e( 'Mapping a shallow path covers everything beneath it, so a handful of decisions usually goes a long way. Anything left unmapped means the product is created uncategorised rather than filed somewhere wrong.', 'pci' ); ?></p>
+		</div>
+
+		<table class="pci-ledger">
+			<tbody>
+				<tr><td><?php esc_html_e( 'Paths in use', 'pci' ); ?></td><td class="num"><?php echo (int) $stats['total']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'Mapped', 'pci' ); ?></td><td class="num"><?php echo (int) $stats['mapped']; ?></td></tr>
+				<tr><td><?php esc_html_e( 'Still to decide', 'pci' ); ?></td><td class="num"><?php echo (int) $stats['unmapped']; ?></td></tr>
+			</tbody>
+		</table>
+
+		<p>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+				<?php wp_nonce_field( 'pci_categories' ); ?>
+				<input type="hidden" name="action" value="pci_categories">
+				<button class="button" name="mode" value="suggest"><?php esc_html_e( 'Accept all confident suggestions', 'pci' ); ?></button>
+				<span class="pci-muted"><?php esc_html_e( 'Only where an SLS level matches one of your category names exactly.', 'pci' ); ?></span>
+			</form>
+		</p>
+
+		<p>
+			<a class="button button-small" href="<?php echo esc_url( add_query_arg( array( 'page' => self::SLUG . '-categories' ), admin_url( 'admin.php' ) ) ); ?>"><?php esc_html_e( 'Only what I need', 'pci' ); ?></a>
+			<a class="button button-small" href="<?php echo esc_url( add_query_arg( array( 'page' => self::SLUG . '-categories', 'all' => 1 ), admin_url( 'admin.php' ) ) ); ?>"><?php esc_html_e( 'Every path in the index', 'pci' ); ?></a>
+		</p>
+
+		<?php if ( empty( $paths ) ) : ?>
+			<p class="pci-muted"><?php esc_html_e( 'No category paths yet — index some SLS products first.', 'pci' ); ?></p>
+		<?php else : ?>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'pci_categories' ); ?>
+				<input type="hidden" name="action" value="pci_categories">
+				<input type="hidden" name="mode" value="save">
+				<table class="widefat striped">
+					<thead><tr>
+						<th style="width:44%;"><?php esc_html_e( 'SLS category path', 'pci' ); ?></th>
+						<th style="width:8%;"><?php esc_html_e( 'Products', 'pci' ); ?></th>
+						<th style="width:48%;"><?php esc_html_e( 'File under', 'pci' ); ?></th>
+					</tr></thead>
+					<tbody>
+					<?php foreach ( $paths as $path => $info ) :
+						$current = isset( $map[ $path ] ) ? (int) $map[ $path ] : -1;
+						$hint    = ( -1 === $current ) ? PCI_Categories::suggest( $info['levels'] ) : array( 'term_id' => 0, 'why' => '' );
+						$value   = ( -1 === $current ) ? (int) $hint['term_id'] : $current;
+						?>
+						<tr>
+							<td>
+								<?php echo esc_html( $path ); ?>
+								<?php if ( ! empty( $hint['why'] ) ) : ?>
+									<br><span class="pci-muted" style="font-size:11px;"><?php echo esc_html( $hint['why'] ); ?></span>
+								<?php endif; ?>
+							</td>
+							<td><?php echo (int) $info['count']; ?></td>
+							<td>
+								<select name="map[<?php echo esc_attr( $path ); ?>]" style="width:100%;">
+									<option value="0"><?php esc_html_e( '— leave uncategorised —', 'pci' ); ?></option>
+									<?php foreach ( $choices as $id => $label ) : ?>
+										<option value="<?php echo (int) $id; ?>" <?php selected( $value, $id ); ?>><?php echo esc_html( $label ); ?></option>
+									<?php endforeach; ?>
+								</select>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+					</tbody>
+				</table>
+				<p><button class="button button-primary button-large"><?php esc_html_e( 'Save the mapping', 'pci' ); ?></button></p>
+			</form>
+		<?php endif; ?>
+		<?php
+		echo '</div>';
+	}
+
+	public function handle_categories() {
+		check_admin_referer( 'pci_categories' );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to do that.', 'pci' ) );
+		}
+
+		$mode = isset( $_POST['mode'] ) ? sanitize_key( $_POST['mode'] ) : '';
+
+		if ( 'suggest' === $mode ) {
+			$n   = PCI_Categories::apply_suggestions( true );
+			$msg = sprintf( __( '%d paths mapped from confident suggestions. Check them before creating products.', 'pci' ), $n );
+		} else {
+			$raw = isset( $_POST['map'] ) && is_array( $_POST['map'] ) ? wp_unslash( $_POST['map'] ) : array();
+			$map = PCI_Categories::map();
+			foreach ( $raw as $path => $term_id ) {
+				$map[ $path ] = (int) $term_id;
+			}
+			PCI_Categories::save_map( $map );
+			$msg = sprintf( __( '%d paths saved.', 'pci' ), count( $raw ) );
+		}
+
+		wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-categories', 'pci_msg' => $msg ), admin_url( 'admin.php' ) ) );
+		exit;
+	}
+
+	public function handle_refetch() {
+		$run_id = isset( $_POST['run'] ) ? (int) $_POST['run'] : 0;
+		check_admin_referer( 'pci_refetch_' . $run_id );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to do that.', 'pci' ) );
+		}
+
+		$all = ! empty( $_POST['all'] );
+		$n   = PCI_Sourcing::clear_fetched( $run_id, ! $all );
+
+		$this->redirect(
+			array( 'view' => 'scrape', 'run' => $run_id ),
+			sprintf( __( '%d rows cleared and will be fetched again.', 'pci' ), $n )
+		);
 	}
 
 	// ---------------------------------------------------------- portal screen

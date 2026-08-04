@@ -154,6 +154,21 @@ class PCI_Sourcing {
 	 * @return array{ids:int[],matched:string[],unmatched:string[]}
 	 */
 	public static function map_categories( array $names ) {
+		// The curated mapping wins. Name matching alone puts Crayola markers
+		// under Childrens Crafts when they belong under Pens and Markers, so a
+		// human decision per path is the only thing that gets this right.
+		if ( class_exists( 'PCI_Categories' ) ) {
+			$ids = PCI_Categories::terms_for( $names );
+			if ( ! empty( $ids ) ) {
+				return array(
+					'ids'       => $ids,
+					'matched'   => $names,
+					'unmatched' => array(),
+					'source'    => 'mapping',
+				);
+			}
+		}
+
 		$ids       = array();
 		$matched   = array();
 		$unmatched = array();
@@ -186,7 +201,29 @@ class PCI_Sourcing {
 			'ids'       => array_values( array_unique( $ids ) ),
 			'matched'   => $matched,
 			'unmatched' => $unmatched,
+			'source'    => 'name-match',
 		);
+	}
+
+	/**
+	 * Forget cached supplier data so rows are fetched afresh.
+	 *
+	 * Useful after the catalog index has been rebuilt: rows that failed under
+	 * an earlier, broken lookup keep their stale error and are never retried,
+	 * because a row with any scrape result counts as done.
+	 *
+	 * @return int
+	 */
+	public static function clear_fetched( $run_id, $failed_only = true ) {
+		global $wpdb;
+		$t = PCI_Schema::table( 'items' );
+
+		$sql = "UPDATE {$t} SET raw = NULL WHERE run_id = %d AND action = %s";
+		if ( $failed_only ) {
+			$sql .= " AND raw LIKE '%scrape_error%'";
+		}
+
+		return (int) $wpdb->query( $wpdb->prepare( $sql, (int) $run_id, PCI_Classifier::NEW_P ) );
 	}
 
 	private static function cat_key( $s ) {
