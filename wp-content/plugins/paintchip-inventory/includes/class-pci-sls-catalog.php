@@ -593,7 +593,7 @@ class PCI_SLS_Catalog {
 	public static function find_sku( $sku ) {
 		$sku = trim( (string) $sku );
 		if ( '' === $sku ) {
-			return array( 'ok' => false, 'message' => __( 'No SKU given.', 'pci' ), 'item' => null );
+			return array( 'ok' => false, 'message' => __( 'No SKU given.', 'pci' ), 'item' => null, 'transport' => false );
 		}
 
 		$res = self::fetch_search( $sku );
@@ -779,7 +779,10 @@ class PCI_SLS_Catalog {
 
 			// Tell a transport failure apart from a real answer. Only the
 			// former should ever stop the run.
-			$transport = ( ! $res['ok'] && ! empty( $res['transport_error'] ) );
+			// find_sku() flags a transport failure as 'transport'. Reading the
+			// wrong key here meant every result looked like a clean answer, so
+			// the streak never advanced and a stale latch could never clear.
+			$transport = ( ! $res['ok'] && ! empty( $res['transport'] ) );
 			self::note_transport( $transport );
 
 			$log[] = array( 'ok' => $res['ok'], 'label' => $sku, 'message' => $res['message'] );
