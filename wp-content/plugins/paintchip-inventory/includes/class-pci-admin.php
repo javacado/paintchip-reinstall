@@ -1274,6 +1274,19 @@ class PCI_Admin {
 			<p><?php esc_html_e( 'Nothing to paste. Press Start and it works through the tree, pausing between requests. Safe to stop and resume — it picks up where it left off.', 'pci' ); ?></p>
 		</div>
 
+		<?php if ( PCI_SLS_Catalog::circuit_open() ) : ?>
+			<div class="pci-danger">
+				<p><strong><?php esc_html_e( 'Paused after repeated connection failures.', 'pci' ); ?></strong><br>
+				<?php esc_html_e( 'SLS stopped answering three times running, so everything was halted rather than risk turning a temporary block into a lasting one. Test the connection, and clear this once it answers again.', 'pci' ); ?></p>
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+					<?php wp_nonce_field( 'pci_catalog' ); ?>
+					<input type="hidden" name="action" value="pci_catalog_reset">
+					<button class="button button-primary" name="mode" value="clear_circuit"><?php esc_html_e( 'Clear the pause', 'pci' ); ?></button>
+					<button class="button" name="mode" value="ping"><?php esc_html_e( 'Test the connection', 'pci' ); ?></button>
+				</form>
+			</div>
+		<?php endif; ?>
+
 		<h2><?php esc_html_e( 'Coverage', 'pci' ); ?></h2>
 		<p class="pci-muted"><?php esc_html_e( 'The number that matters: how many SLS products waiting to be sourced can now be resolved from the index.', 'pci' ); ?></p>
 		<div style="background:#f0f0f1;border-radius:3px;height:26px;max-width:640px;overflow:hidden;">
@@ -1740,6 +1753,12 @@ class PCI_Admin {
 			exit;
 		}
 
+		if ( 'clear_circuit' === $mode ) {
+			PCI_SLS_Catalog::clear_fail_streak();
+			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => __( 'Pause cleared. Test the connection before starting a long run.', 'pci' ) ), admin_url( 'admin.php' ) ) );
+			exit;
+		}
+
 		if ( 'reset_paging' === $mode ) {
 			PCI_SLS_Catalog::reset_paging();
 			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => __( 'Paging reset to the start of the catalog.', 'pci' ) ), admin_url( 'admin.php' ) ) );
@@ -1758,9 +1777,14 @@ class PCI_Admin {
 			$body = ( new PCI_Http( 'SS' ) )->get( PCI_SLS_Catalog::BASE );
 			$ms   = round( ( microtime( true ) - $t0 ) * 1000 );
 
+			if ( ! is_wp_error( $body ) ) {
+				// Answering again means the earlier failures are history.
+				PCI_SLS_Catalog::clear_fail_streak();
+			}
+
 			$msg = is_wp_error( $body )
 				? sprintf( __( 'No answer from SLS after %1$dms: %2$s', 'pci' ), $ms, $body->get_error_message() )
-				: sprintf( __( 'SLS answered in %1$dms with %2$d bytes. Safe to run.', 'pci' ), $ms, strlen( $body ) );
+				: sprintf( __( 'SLS answered in %1$dms with %2$d bytes. Pause cleared — safe to run.', 'pci' ), $ms, strlen( $body ) );
 
 			wp_safe_redirect( add_query_arg( array(
 				'page'     => self::SLUG . '-catalog',
