@@ -235,31 +235,6 @@ class PCI_SLS_Catalog {
 	 * UPC and the category path. Far cheaper than crawling the whole tree when
 	 * only a few hundred SKUs are wanted.
 	 */
-	/**
-	 * Global SKU search.
-	 *
-	 * Every parameter has to be present, empty ones included. A shortened query
-	 * string does not error — it quietly returns a default listing, so the
-	 * search appears to work while never finding the requested SKU. The empty
-	 * level1..level5 are what make the search global rather than scoped to a
-	 * category.
-	 */
-	public static function search_url( $sku ) {
-		return self::BASE . 'fright_itemlist.asp?' . http_build_query( array(
-			'level1'    => '',
-			'level2'    => '',
-			'level3'    => '',
-			'level4'    => '',
-			'level5'    => '',
-			'skuonly'   => '',
-			'txtfind'   => trim( (string) $sku ),
-			'ltlonly'   => '',
-			'Findimg'   => '',
-			'findclick' => '',
-			'newsearch' => '',
-			'brand'     => '',
-		) );
-	}
 
 	/**
 	 * Fetch and index a single SKU via search.
@@ -319,69 +294,96 @@ class PCI_SLS_Catalog {
 	}
 
 	/**
-	 * The outer frameset URL for a search.
+	 * Step one of a search: the narrowed category tree.
 	 *
-	 * Loading this first appears to be what establishes the search in session
-	 * state; the inner frame then renders the result. Fetching the frame alone
-	 * returns a default listing, which reads as "no match" and is why every
-	 * lookup failed.
+	 * The search box posts to fright.asp, not to the listing. Findimg carries
+	 * the submit button's own value — sending it empty is what made every
+	 * earlier attempt fall through to an unfiltered catalog dump.
 	 */
-	public static function search_frame_url( $sku ) {
-		return self::BASE . 'defaultframe.asp?' . http_build_query( array(
-			'level1'  => '',
-			'level2'  => '',
-			'level3'  => '',
-			'level4'  => '',
-			'level5'  => '',
-			'skuonly' => '',
-			'txtfind' => trim( (string) $sku ),
-			'ltlonly' => '',
+	public static function search_tree_url( $sku ) {
+		return self::BASE . 'fright.asp?' . http_build_query( array(
+			'txtfind'   => trim( (string) $sku ),
+			'brand'     => '',
+			'Findimg'   => 'Search Items',
+			'findclick' => 'Y',
+			'newsearch' => 'Y',
 		) );
 	}
 
-	/**
-	 * Fetch a search result, priming the frameset first.
-	 *
-	 * @return string|WP_Error
-	 */
-	/** The fields the search form submits. */
-	public static function search_fields( $sku, array $extra = array() ) {
-		return array_merge( array(
-			'level1'    => '',
-			'level2'    => '',
-			'level3'    => '',
-			'level4'    => '',
-			'level5'    => '',
-			'skuonly'   => '',
-			'txtfind'   => trim( (string) $sku ),
-			'ltlonly'   => '',
-			'Findimg'   => '',
-			'findclick' => 'Y',
-			'newsearch' => 'Y',
-			'brand'     => '',
-			'vlastsku'  => '',
-			'kregnum'   => '',
-			'qtyfield'  => '',
-		), $extra );
+	/** Step two: the listing for a category, filtered to the searched SKU. */
+	public static function listing_url_for( $listing_url, $sku ) {
+		$glue = ( false === strpos( $listing_url, '?' ) ) ? '?' : '&';
+		return $listing_url . $glue . 'findtype=&txtfind=' . rawurlencode( trim( (string) $sku ) );
+	}
+
+	/** Kept for the debug panel and older callers. */
+	public static function search_url( $sku ) {
+		return self::search_tree_url( $sku );
+	}
+
+	private static function get_page( $url ) {
+		if ( PCI_Scraper_SLS::portal_enabled() ) {
+			$scraper = new PCI_Scraper_SLS();
+			return $scraper->portal_get( $url );
+		}
+		$http = new PCI_Http( 'SS' );
+		return $http->get( $url );
 	}
 
 	/**
-	 * Run a search.
+	 * Search for a SKU and return its listing page.
 	 *
-	 * The form is method="post" and the endpoint ignores txtfind entirely on a
-	 * GET — it answers with the unfiltered catalog instead, which reads as a
-	 * miss for every SKU. Posting is what the site itself does.
+	 * Hop one narrows the category tree to wherever the SKU lives; hop two
+	 * loads that category's listing with the SKU filter applied. The category
+	 * path falls out of hop one for free, which is exactly what product
+	 * creation needs anyway.
 	 *
-	 * @return string|WP_Error
+	 * @return array{html:string,listing_url:string,path:array}|WP_Error
 	 */
 	public static function fetch_search( $sku, array $extra = array() ) {
-		$scraper = new PCI_Scraper_SLS();
-		$portal  = PCI_Scraper_SLS::portal_enabled();
-		$http    = new PCI_Http( 'SS' );
-		$url     = self::BASE . 'fright_itemlist.asp';
-		$fields  = self::search_fields( $sku, $extra );
+		$tree = self::get_page( self::search_tree_url( $sku ) );
+		if ( is_wp_error( $tree ) ) {
+			return $tree;
+		}
 
-		return $portal ? $scraper->portal_post( $url, $fields ) : $http->post( $url, $fields );
+		$links    = self::parse_links( $tree );
+		$listings = array();
+		foreach ( $links as $url => $meta ) {
+			if ( 'listing' === $meta['kind'] ) {
+				$listings[ $url ] = $meta['label'];
+			}
+		}
+
+		if ( empty( $listings ) ) {
+			return new WP_Error(
+				'pci_no_category',
+				__( 'The search did not narrow to any category — SLS most likely does not carry that code.', 'pci' ),
+				array( 'tree_bytes' => strlen( $tree ) )
+			);
+		}
+
+		self::pause();
+
+		// The deepest link is the most specific category.
+		$best = '';
+		foreach ( array_keys( $listings ) as $url ) {
+			if ( substr_count( $url, 'level' ) >= substr_count( $best, 'level' ) ) {
+				$best = $url;
+			}
+		}
+
+		$listing_url = self::listing_url_for( $best, $sku );
+		$html        = self::get_page( $listing_url );
+
+		if ( is_wp_error( $html ) ) {
+			return $html;
+		}
+
+		return array(
+			'html'        => $html,
+			'listing_url' => $listing_url,
+			'candidates'  => array_keys( $listings ),
+		);
 	}
 
 	/**
@@ -390,21 +392,22 @@ class PCI_SLS_Catalog {
 	 * @return array
 	 */
 	public static function debug_search( $sku, array $extra = array() ) {
-		$fields = self::search_fields( $sku, $extra );
-
 		$out = array(
 			'sku'        => $sku,
-			'frame_url'  => 'POST ' . self::BASE . 'fright_itemlist.asp',
-			'search_url' => http_build_query( array_filter( $fields, function ( $v ) { return '' !== $v; } ) ),
+			'frame_url'  => self::search_tree_url( $sku ),
+			'search_url' => '',
 			'portal'     => PCI_Scraper_SLS::portal_enabled(),
 		);
 
-		$html = self::fetch_search( $sku, $extra );
+		$res = self::fetch_search( $sku, $extra );
 
-		if ( is_wp_error( $html ) ) {
-			$out['error'] = $html->get_error_message();
+		if ( is_wp_error( $res ) ) {
+			$out['error'] = $res->get_error_message();
 			return $out;
 		}
+
+		$html               = $res['html'];
+		$out['search_url']  = $res['listing_url'];
 
 		$parsed = self::parse_listing( $html );
 
@@ -484,7 +487,8 @@ class PCI_SLS_Catalog {
 
 		for ( $b = 0; $b < $batches && ! empty( $remaining ); $b++ ) {
 			$prefix = array_shift( $remaining );
-			$html   = self::fetch_search( $prefix );
+			$res    = self::fetch_search( $prefix );
+			$html   = is_wp_error( $res ) ? $res : $res['html'];
 
 			if ( is_wp_error( $html ) ) {
 				$log[] = array( 'ok' => false, 'label' => $prefix, 'message' => $html->get_error_message() );
@@ -568,7 +572,13 @@ class PCI_SLS_Catalog {
 			return array( 'ok' => false, 'message' => __( 'No SKU given.', 'pci' ), 'item' => null );
 		}
 
-		$html = self::fetch_search( $sku );
+		$res = self::fetch_search( $sku );
+
+		if ( ! is_wp_error( $res ) ) {
+			$html = $res['html'];
+		} else {
+			$html = $res;
+		}
 
 		if ( is_wp_error( $html ) ) {
 			// A transport failure is not the same as "not stocked", so it is
