@@ -268,6 +268,15 @@ class PCI_SLS_Catalog {
 		) );
 	}
 
+	/** Has this SKU already been looked up, whatever the outcome? */
+	public static function was_searched( $sku ) {
+		global $wpdb;
+		return (bool) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM " . self::crawl_table() . " WHERE kind='search' AND label = %s",
+			trim( (string) $sku )
+		) );
+	}
+
 	/** How many SKUs were searched for and genuinely not found at SLS. */
 	public static function not_found_count() {
 		global $wpdb;
@@ -605,14 +614,29 @@ class PCI_SLS_Catalog {
 		}
 
 		if ( is_wp_error( $html ) ) {
-			// A transport failure is not the same as "not stocked", so it is
-			// left unrecorded and will be retried — but it is flagged so the
-			// caller can stop rather than loop on an unreachable server.
+			$code = $html->get_error_code();
+
+			// "The search found no category" is a definitive answer from SLS,
+			// not a failure to reach it. Recording it is what stops the SKU
+			// coming back round on the next batch forever.
+			if ( 'pci_no_category' === $code || 'pci_not_found' === $code ) {
+				self::mark_searched( $sku, false, 'search matched no category' );
+				return array(
+					'ok'        => false,
+					'message'   => $html->get_error_message(),
+					'item'      => null,
+					'transport' => false,
+				);
+			}
+
+			// Anything else is a genuine transport problem: leave it
+			// unrecorded so it can be retried, but flag it so the caller can
+			// stop rather than hammer an unreachable server.
 			return array(
-				'ok'              => false,
-				'message'         => $html->get_error_message(),
-				'item'            => null,
-				'transport_error' => true,
+				'ok'        => false,
+				'message'   => $html->get_error_message(),
+				'item'      => null,
+				'transport' => true,
 			);
 		}
 
@@ -776,6 +800,14 @@ class PCI_SLS_Catalog {
 
 		foreach ( self::missing_skus( $limit ) as $sku ) {
 			$res = self::find_sku( $sku );
+
+			// Safety net. Every branch of find_sku() should either record the
+			// attempt or flag a transport failure, but if one ever forgets,
+			// the SKU would return in the next batch forever. Record it here
+			// so a missed case costs one wasted lookup, not an endless loop.
+			if ( empty( $res['transport'] ) && ! self::was_searched( $sku ) ) {
+				self::mark_searched( $sku, ! empty( $res['ok'] ), 'recorded by the loop guard' );
+			}
 
 			// Tell a transport failure apart from a real answer. Only the
 			// former should ever stop the run.
