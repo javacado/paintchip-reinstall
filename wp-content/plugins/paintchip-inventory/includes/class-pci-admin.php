@@ -22,6 +22,7 @@ class PCI_Admin {
 		add_action( 'admin_post_pci_portal', array( $this, 'handle_portal' ) );
 		add_action( 'wp_ajax_pci_crawl_step', array( $this, 'ajax_crawl_step' ) );
 		add_action( 'wp_ajax_pci_find_missing', array( $this, 'ajax_find_missing' ) );
+		add_action( 'wp_ajax_pci_page_catalog', array( $this, 'ajax_page_catalog' ) );
 		add_action( 'admin_post_pci_catalog_reset', array( $this, 'handle_catalog_reset' ) );
 		add_action( 'admin_post_pci_export', array( $this, 'handle_export' ) );
 		add_action( 'wp_ajax_pci_scrape', array( $this, 'ajax_scrape' ) );
@@ -1297,6 +1298,23 @@ class PCI_Admin {
 			</div>
 		<?php endif; ?>
 
+		<?php $pg = PCI_SLS_Catalog::paging_state(); ?>
+		<h2 class="pci-section"><?php esc_html_e( 'Index the whole catalog, a block at a time', 'pci' ); ?></h2>
+		<p><?php esc_html_e( 'With no category filter, SLS returns its entire catalog in alphabetical blocks of 500. Around 64 requests covers everything — far quicker than walking the tree or searching one SKU at a time.', 'pci' ); ?></p>
+		<p>
+			<button class="button button-primary button-large" id="pci-page-start"><?php esc_html_e( 'Index the catalog', 'pci' ); ?></button>
+			<button class="button" id="pci-page-stop" disabled><?php esc_html_e( 'Stop', 'pci' ); ?></button>
+			<span id="pci-page-status" class="pci-muted">
+				<?php
+				if ( $pg['done'] ) {
+					esc_html_e( 'Complete.', 'pci' );
+				} elseif ( $pg['cursor'] ) {
+					printf( esc_html__( 'Paused after %s — press to continue.', 'pci' ), esc_html( $pg['cursor'] ) );
+				}
+				?>
+			</span>
+		</p>
+
 		<h2 class="pci-section"><?php esc_html_e( 'Option 1 — look up only what you need', 'pci' ); ?></h2>
 		<p><?php esc_html_e( 'The listing page accepts a SKU search, and a search result is still a listing row, so it carries the UPC, prices and category path. This asks SLS about each SKU you are missing, one at a time. Much faster than walking the whole tree when only a few hundred products are wanted.', 'pci' ); ?></p>
 		<p>
@@ -1364,6 +1382,7 @@ class PCI_Admin {
 			<input type="hidden" name="action" value="pci_catalog_reset">
 			<button class="button button-small" name="mode" value="retry"><?php esc_html_e( 'Retry failed pages', 'pci' ); ?></button>
 			<button class="button button-small" name="mode" value="clear_notfound"><?php esc_html_e( 'Retry not-found SKUs', 'pci' ); ?></button>
+			<button class="button button-small" name="mode" value="reset_paging"><?php esc_html_e( 'Restart catalog paging', 'pci' ); ?></button>
 			<button class="button button-small" onclick="return confirm('<?php echo esc_js( __( 'Clear the page-crawl frontier and walk the tree again from the top? Indexed products are kept.', 'pci' ) ); ?>');"><?php esc_html_e( 'Reset the queue', 'pci' ); ?></button>
 			<span class="pci-muted"><?php esc_html_e( 'Reset clears only the page-crawl frontier. Indexed products and the record of what SLS does not stock are both kept.', 'pci' ); ?></span>
 		</form>
@@ -1608,6 +1627,51 @@ class PCI_Admin {
 					.catch(function () { fstatus.textContent = 'Request failed. Press again to resume.'; finding = false; fstart.disabled = false; fstop.disabled = true; });
 			}
 
+			// Catalog paging.
+			var pstart = document.getElementById('pci-page-start');
+			var pstop = document.getElementById('pci-page-stop');
+			var pstatus = document.getElementById('pci-page-status');
+			var paging = false;
+
+			function pageStep() {
+				if (!paging) { pstatus.textContent = 'Stopped — press to continue.'; pstart.disabled = false; pstop.disabled = true; return; }
+
+				var body = new FormData();
+				body.append('action', 'pci_page_catalog');
+				body.append('_ajax_nonce', nonce);
+
+				fetch(ajaxurl, { method: 'POST', body: body, credentials: 'same-origin' })
+					.then(function (r) { return r.json(); })
+					.then(function (res) {
+						if (!res.success) { pstatus.textContent = res.data || 'Failed'; paging = false; pstart.disabled = false; pstop.disabled = true; return; }
+						var d = res.data;
+						(d.log || []).forEach(function (l) { line(l.ok, l.label, l.message); });
+
+						document.getElementById('pci-cat-total').textContent = d.catalog.total;
+						document.getElementById('pci-cat-upc').textContent = d.catalog.with_upc;
+						document.getElementById('pci-cov-bar').style.width = d.coverage.pct + '%';
+						document.getElementById('pci-cov-text').textContent =
+							d.coverage.have + ' of ' + d.coverage.needed + ' needed SKUs indexed (' + d.coverage.pct + '%)';
+
+						if (d.done) {
+							pstatus.textContent = 'Finished — the whole catalog is indexed.';
+							paging = false; pstart.disabled = false; pstop.disabled = true; return;
+						}
+						pstatus.textContent = 'Up to ' + d.cursor + ' — ' + d.catalog.total + ' indexed';
+						pageStep();
+					})
+					.catch(function () { pstatus.textContent = 'Request failed. Press to resume.'; paging = false; pstart.disabled = false; pstop.disabled = true; });
+			}
+
+			pstart.addEventListener('click', function (e) {
+				e.preventDefault();
+				paging = true; pstart.disabled = true; pstop.disabled = false;
+				log.style.display = 'block';
+				pstatus.textContent = 'Indexing…';
+				pageStep();
+			});
+			pstop.addEventListener('click', function (e) { e.preventDefault(); paging = false; });
+
 			fstart.addEventListener('click', function (e) {
 				e.preventDefault();
 				finding = true;
@@ -1652,6 +1716,17 @@ class PCI_Admin {
 		wp_send_json_success( PCI_SLS_Catalog::find_missing( 3 ) );
 	}
 
+	public function ajax_page_catalog() {
+		check_ajax_referer( 'pci_crawl' );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_send_json_error( __( 'You do not have permission to do that.', 'pci' ) );
+		}
+
+		@set_time_limit( 180 );
+
+		wp_send_json_success( PCI_SLS_Catalog::page_catalog( 1 ) );
+	}
+
 	public function handle_catalog_reset() {
 		check_admin_referer( 'pci_catalog' );
 		if ( ! current_user_can( PCI_CAP ) ) {
@@ -1662,6 +1737,12 @@ class PCI_Admin {
 		if ( 'save_delay' === $mode ) {
 			update_option( PCI_SLS_Catalog::OPT_DELAY_MS, max( 250, min( 10000, (int) $_POST['delay'] ) ) );
 			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => __( 'Pause saved.', 'pci' ) ), admin_url( 'admin.php' ) ) );
+			exit;
+		}
+
+		if ( 'reset_paging' === $mode ) {
+			PCI_SLS_Catalog::reset_paging();
+			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => __( 'Paging reset to the start of the catalog.', 'pci' ) ), admin_url( 'admin.php' ) ) );
 			exit;
 		}
 

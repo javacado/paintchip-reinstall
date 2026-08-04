@@ -142,6 +142,37 @@ class PCI_Scraper_SLS implements PCI_Scraper {
 	}
 
 	/**
+	 * POST to the portal, logging in once if the session has lapsed.
+	 *
+	 * @return string|WP_Error
+	 */
+	public function portal_post( $url, array $fields ) {
+		$http = $this->http();
+
+		if ( ! $http->has_session() ) {
+			$ok = $this->portal_login();
+			if ( is_wp_error( $ok ) ) {
+				return $ok;
+			}
+		}
+
+		$body = $http->post( $url, $fields );
+		if ( is_wp_error( $body ) ) {
+			return $body;
+		}
+
+		if ( self::looks_logged_out( $body ) ) {
+			$ok = $this->portal_login( true );
+			if ( is_wp_error( $ok ) ) {
+				return $ok;
+			}
+			$body = $http->post( $url, $fields );
+		}
+
+		return $body;
+	}
+
+	/**
 	 * Fetch a portal page, logging in once if the session has lapsed.
 	 *
 	 * @return string|WP_Error

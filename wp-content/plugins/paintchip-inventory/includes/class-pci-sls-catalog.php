@@ -403,6 +403,125 @@ class PCI_SLS_Catalog {
 		return $out;
 	}
 
+	// ----------------------------------------------------- full-catalog page
+
+	const OPT_PAGE_CURSOR = 'pci_sls_page_cursor';
+	const OPT_PAGE_DONE   = 'pci_sls_page_done';
+
+	/**
+	 * Page through the entire catalog.
+	 *
+	 * The listing endpoint with no category filter returns the whole catalog in
+	 * alphabetical blocks of 500, and the form carries a hidden `vlastsku`
+	 * field — the last SKU on the page. Posting that back asks for the block
+	 * after it. Sixty-odd requests covers everything, which is far cheaper than
+	 * either walking the category tree or searching SKU by SKU.
+	 *
+	 * @return array
+	 */
+	public static function page_catalog( $batches = 1 ) {
+		$cursor = (string) get_option( self::OPT_PAGE_CURSOR, '' );
+		$log    = array();
+		$done   = false;
+
+		$scraper = new PCI_Scraper_SLS();
+		$portal  = PCI_Scraper_SLS::portal_enabled();
+		$http    = new PCI_Http( 'SS' );
+		$url     = self::BASE . 'fright_itemlist.asp';
+
+		for ( $b = 0; $b < $batches; $b++ ) {
+			$fields = array(
+				'level1'    => '',
+				'level2'    => '',
+				'level3'    => '',
+				'level4'    => '',
+				'level5'    => '',
+				'skuonly'   => '',
+				'txtfind'   => '',
+				'ltlonly'   => '',
+				'Findimg'   => '',
+				'findclick' => '',
+				'newsearch' => '',
+				'brand'     => '',
+				'vlastsku'  => $cursor,
+				'kregnum'   => '',
+				'qtyfield'  => '',
+			);
+
+			$html = $portal
+				? $scraper->portal_post( $url, $fields )
+				: $http->post( $url, $fields );
+
+			if ( is_wp_error( $html ) ) {
+				$log[] = array( 'ok' => false, 'label' => $cursor ? 'after ' . $cursor : 'start', 'message' => $html->get_error_message() );
+				break;
+			}
+
+			$parsed = self::parse_listing( $html );
+			$n      = count( $parsed['items'] );
+
+			if ( 0 === $n ) {
+				$log[] = array( 'ok' => false, 'label' => $cursor ? 'after ' . $cursor : 'start', 'message' => __( 'No rows returned — treating the catalog as complete.', 'pci' ) );
+				$done  = true;
+				break;
+			}
+
+			$first = $parsed['items'][0]['sku'];
+			$last  = $parsed['items'][ $n - 1 ]['sku'];
+
+			// Guard against a cursor that does not advance, which would
+			// otherwise re-index the same block forever.
+			if ( $last === $cursor ) {
+				$log[] = array( 'ok' => false, 'label' => $last, 'message' => __( 'The cursor stopped advancing — stopping here.', 'pci' ) );
+				$done  = true;
+				break;
+			}
+
+			$res = self::index_items( $parsed['items'] );
+
+			$log[] = array(
+				'ok'      => true,
+				'label'   => $first . ' … ' . $last,
+				'message' => sprintf( __( '%1$d products (%2$d new, %3$d updated)', 'pci' ), $n, $res['added'], $res['updated'] ),
+			);
+
+			$cursor = $last;
+			update_option( self::OPT_PAGE_CURSOR, $cursor, false );
+
+			// A short final block means the end of the catalog.
+			if ( $n < 100 ) {
+				$done = true;
+				break;
+			}
+
+			self::pause();
+		}
+
+		if ( $done ) {
+			update_option( self::OPT_PAGE_DONE, 1, false );
+		}
+
+		return array(
+			'log'      => $log,
+			'cursor'   => $cursor,
+			'done'     => $done,
+			'catalog'  => self::stats(),
+			'coverage' => self::coverage(),
+		);
+	}
+
+	public static function reset_paging() {
+		delete_option( self::OPT_PAGE_CURSOR );
+		delete_option( self::OPT_PAGE_DONE );
+	}
+
+	public static function paging_state() {
+		return array(
+			'cursor' => (string) get_option( self::OPT_PAGE_CURSOR, '' ),
+			'done'   => (bool) get_option( self::OPT_PAGE_DONE, false ),
+		);
+	}
+
 	public static function find_sku( $sku ) {
 		$sku = trim( (string) $sku );
 		if ( '' === $sku ) {
