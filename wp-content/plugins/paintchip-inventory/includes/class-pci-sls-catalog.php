@@ -310,10 +310,34 @@ class PCI_SLS_Catalog {
 		) );
 	}
 
-	/** Step two: the listing for a category, filtered to the searched SKU. */
+	/**
+	 * Step two: the listing for a category, filtered to the searched SKU.
+	 *
+	 * The link taken from the search tree may already carry findtype/txtfind,
+	 * so those are stripped before being added back. Duplicated parameters are
+	 * harmless on some pages and confusing on others.
+	 */
 	public static function listing_url_for( $listing_url, $sku ) {
-		$glue = ( false === strpos( $listing_url, '?' ) ) ? '?' : '&';
-		return $listing_url . $glue . 'findtype=&txtfind=' . rawurlencode( trim( (string) $sku ) );
+		$parts = explode( '?', $listing_url, 2 );
+		$base  = $parts[0];
+		$query = isset( $parts[1] ) ? $parts[1] : '';
+
+		$keep = array();
+		foreach ( explode( '&', $query ) as $pair ) {
+			if ( '' === $pair ) {
+				continue;
+			}
+			$name = strtolower( explode( '=', $pair, 2 )[0] );
+			if ( 'findtype' === $name || 'txtfind' === $name ) {
+				continue;
+			}
+			$keep[] = $pair;
+		}
+
+		$keep[] = 'findtype=';
+		$keep[] = 'txtfind=' . rawurlencode( trim( (string) $sku ) );
+
+		return $base . '?' . implode( '&', $keep );
 	}
 
 	/** Kept for the debug panel and older callers. */
