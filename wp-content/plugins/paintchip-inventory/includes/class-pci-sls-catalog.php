@@ -344,25 +344,44 @@ class PCI_SLS_Catalog {
 	 *
 	 * @return string|WP_Error
 	 */
-	public static function fetch_search( $sku ) {
+	/** The fields the search form submits. */
+	public static function search_fields( $sku, array $extra = array() ) {
+		return array_merge( array(
+			'level1'    => '',
+			'level2'    => '',
+			'level3'    => '',
+			'level4'    => '',
+			'level5'    => '',
+			'skuonly'   => '',
+			'txtfind'   => trim( (string) $sku ),
+			'ltlonly'   => '',
+			'Findimg'   => '',
+			'findclick' => 'Y',
+			'newsearch' => 'Y',
+			'brand'     => '',
+			'vlastsku'  => '',
+			'kregnum'   => '',
+			'qtyfield'  => '',
+		), $extra );
+	}
+
+	/**
+	 * Run a search.
+	 *
+	 * The form is method="post" and the endpoint ignores txtfind entirely on a
+	 * GET — it answers with the unfiltered catalog instead, which reads as a
+	 * miss for every SKU. Posting is what the site itself does.
+	 *
+	 * @return string|WP_Error
+	 */
+	public static function fetch_search( $sku, array $extra = array() ) {
 		$scraper = new PCI_Scraper_SLS();
 		$portal  = PCI_Scraper_SLS::portal_enabled();
 		$http    = new PCI_Http( 'SS' );
+		$url     = self::BASE . 'fright_itemlist.asp';
+		$fields  = self::search_fields( $sku, $extra );
 
-		// Step 1: the outer page, to register the search.
-		$outer = self::search_frame_url( $sku );
-		if ( $portal ) {
-			$scraper->portal_get( $outer );
-		} else {
-			$http->get( $outer );
-		}
-
-		usleep( 250000 );
-
-		// Step 2: the frame that actually holds the table.
-		$inner = self::search_url( $sku );
-
-		return $portal ? $scraper->portal_get( $inner ) : $http->get( $inner );
+		return $portal ? $scraper->portal_post( $url, $fields ) : $http->post( $url, $fields );
 	}
 
 	/**
@@ -370,15 +389,17 @@ class PCI_SLS_Catalog {
 	 *
 	 * @return array
 	 */
-	public static function debug_search( $sku ) {
+	public static function debug_search( $sku, array $extra = array() ) {
+		$fields = self::search_fields( $sku, $extra );
+
 		$out = array(
 			'sku'        => $sku,
-			'frame_url'  => self::search_frame_url( $sku ),
-			'search_url' => self::search_url( $sku ),
+			'frame_url'  => 'POST ' . self::BASE . 'fright_itemlist.asp',
+			'search_url' => http_build_query( array_filter( $fields, function ( $v ) { return '' !== $v; } ) ),
 			'portal'     => PCI_Scraper_SLS::portal_enabled(),
 		);
 
-		$html = self::fetch_search( $sku );
+		$html = self::fetch_search( $sku, $extra );
 
 		if ( is_wp_error( $html ) ) {
 			$out['error'] = $html->get_error_message();
@@ -419,91 +440,110 @@ class PCI_SLS_Catalog {
 	 *
 	 * @return array
 	 */
+	/**
+	 * Two-letter brand prefixes, used to page the catalog.
+	 *
+	 * The endpoint caps a result set at 500 and offers no working cursor, so
+	 * the catalog is walked in slices instead. SLS SKUs begin with a two-letter
+	 * brand code, and a prefix search returns just that brand — comfortably
+	 * under the cap for almost all of them.
+	 */
+	public static function prefixes() {
+		$out = array();
+		foreach ( range( 'A', 'Z' ) as $a ) {
+			foreach ( range( 'A', 'Z' ) as $b ) {
+				$out[] = $a . $b;
+			}
+		}
+		return $out;
+	}
+
 	public static function page_catalog( $batches = 1 ) {
-		$cursor = (string) get_option( self::OPT_PAGE_CURSOR, '' );
-		$log    = array();
-		$done   = false;
+		$done_list = get_option( self::OPT_PAGE_CURSOR, array() );
+		if ( ! is_array( $done_list ) ) {
+			$done_list = array();
+		}
 
-		$scraper = new PCI_Scraper_SLS();
-		$portal  = PCI_Scraper_SLS::portal_enabled();
-		$http    = new PCI_Http( 'SS' );
-		$url     = self::BASE . 'fright_itemlist.asp';
+		$all       = self::prefixes();
+		$remaining = array_values( array_diff( $all, $done_list ) );
+		$log       = array();
+		$done      = false;
 
-		for ( $b = 0; $b < $batches; $b++ ) {
-			$fields = array(
-				'level1'    => '',
-				'level2'    => '',
-				'level3'    => '',
-				'level4'    => '',
-				'level5'    => '',
-				'skuonly'   => '',
-				'txtfind'   => '',
-				'ltlonly'   => '',
-				'Findimg'   => '',
-				'findclick' => '',
-				'newsearch' => '',
-				'brand'     => '',
-				'vlastsku'  => $cursor,
-				'kregnum'   => '',
-				'qtyfield'  => '',
+		if ( empty( $remaining ) ) {
+			update_option( self::OPT_PAGE_DONE, 1, false );
+			return array(
+				'log'      => array(),
+				'cursor'   => sprintf( __( 'all %d prefixes done', 'pci' ), count( $all ) ),
+				'done'     => true,
+				'catalog'  => self::stats(),
+				'coverage' => self::coverage(),
 			);
+		}
 
-			$html = $portal
-				? $scraper->portal_post( $url, $fields )
-				: $http->post( $url, $fields );
+		$fails = 0;
+
+		for ( $b = 0; $b < $batches && ! empty( $remaining ); $b++ ) {
+			$prefix = array_shift( $remaining );
+			$html   = self::fetch_search( $prefix );
 
 			if ( is_wp_error( $html ) ) {
-				$log[] = array( 'ok' => false, 'label' => $cursor ? 'after ' . $cursor : 'start', 'message' => $html->get_error_message() );
-				break;
+				$log[] = array( 'ok' => false, 'label' => $prefix, 'message' => $html->get_error_message() );
+				if ( ++$fails >= 3 ) {
+					break;
+				}
+				continue;
 			}
 
+			$fails  = 0;
 			$parsed = self::parse_listing( $html );
 			$n      = count( $parsed['items'] );
 
-			if ( 0 === $n ) {
-				$log[] = array( 'ok' => false, 'label' => $cursor ? 'after ' . $cursor : 'start', 'message' => __( 'No rows returned — treating the catalog as complete.', 'pci' ) );
-				$done  = true;
-				break;
+			// Keep only rows that really start with this prefix: an unfiltered
+			// response would otherwise dump the whole catalog under it.
+			$mine = array();
+			foreach ( $parsed['items'] as $item ) {
+				if ( 0 === stripos( $item['sku'], $prefix ) ) {
+					$mine[] = $item;
+				}
 			}
 
-			$first = $parsed['items'][0]['sku'];
-			$last  = $parsed['items'][ $n - 1 ]['sku'];
+			$done_list[] = $prefix;
+			update_option( self::OPT_PAGE_CURSOR, $done_list, false );
 
-			// Guard against a cursor that does not advance, which would
-			// otherwise re-index the same block forever.
-			if ( $last === $cursor ) {
-				$log[] = array( 'ok' => false, 'label' => $last, 'message' => __( 'The cursor stopped advancing — stopping here.', 'pci' ) );
-				$done  = true;
-				break;
-			}
-
-			$res = self::index_items( $parsed['items'] );
-
-			$log[] = array(
-				'ok'      => true,
-				'label'   => $first . ' … ' . $last,
-				'message' => sprintf( __( '%1$d products (%2$d new, %3$d updated)', 'pci' ), $n, $res['added'], $res['updated'] ),
-			);
-
-			$cursor = $last;
-			update_option( self::OPT_PAGE_CURSOR, $cursor, false );
-
-			// A short final block means the end of the catalog.
-			if ( $n < 100 ) {
-				$done = true;
-				break;
+			if ( empty( $mine ) ) {
+				$log[] = array(
+					'ok'      => false,
+					'label'   => $prefix,
+					'message' => $n
+						? sprintf( __( 'no %1$s products (%2$d unrelated rows ignored)', 'pci' ), $prefix, $n )
+						: __( 'nothing returned', 'pci' ),
+				);
+			} else {
+				$res   = self::index_items( $mine );
+				$log[] = array(
+					'ok'      => true,
+					'label'   => $prefix,
+					'message' => sprintf(
+						__( '%1$d products (%2$d new, %3$d updated)%4$s', 'pci' ),
+						count( $mine ),
+						$res['added'],
+						$res['updated'],
+						count( $mine ) >= 495 ? __( ' — at the 500 cap, may be truncated', 'pci' ) : ''
+					),
+				);
 			}
 
 			self::pause();
 		}
 
-		if ( $done ) {
+		if ( empty( $remaining ) ) {
+			$done = true;
 			update_option( self::OPT_PAGE_DONE, 1, false );
 		}
 
 		return array(
 			'log'      => $log,
-			'cursor'   => $cursor,
+			'cursor'   => sprintf( __( '%1$d of %2$d prefixes', 'pci' ), count( $done_list ), count( $all ) ),
 			'done'     => $done,
 			'catalog'  => self::stats(),
 			'coverage' => self::coverage(),

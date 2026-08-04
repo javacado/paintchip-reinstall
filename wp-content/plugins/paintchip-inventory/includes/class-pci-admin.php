@@ -1299,8 +1299,8 @@ class PCI_Admin {
 		<?php endif; ?>
 
 		<?php $pg = PCI_SLS_Catalog::paging_state(); ?>
-		<h2 class="pci-section"><?php esc_html_e( 'Index the whole catalog, a block at a time', 'pci' ); ?></h2>
-		<p><?php esc_html_e( 'With no category filter, SLS returns its entire catalog in alphabetical blocks of 500. Around 64 requests covers everything — far quicker than walking the tree or searching one SKU at a time.', 'pci' ); ?></p>
+		<h2 class="pci-section"><?php esc_html_e( 'Index the whole catalog by brand prefix', 'pci' ); ?></h2>
+		<p><?php esc_html_e( 'SLS caps any result set at 500 rows and offers no working page cursor, so the catalog is walked in slices: a search for each two-letter brand prefix, AA through ZZ. 676 requests, most of them empty and quick.', 'pci' ); ?></p>
 		<p>
 			<button class="button button-primary button-large" id="pci-page-start"><?php esc_html_e( 'Index the catalog', 'pci' ); ?></button>
 			<button class="button" id="pci-page-stop" disabled><?php esc_html_e( 'Stop', 'pci' ); ?></button>
@@ -1724,7 +1724,7 @@ class PCI_Admin {
 
 		@set_time_limit( 180 );
 
-		wp_send_json_success( PCI_SLS_Catalog::page_catalog( 1 ) );
+		wp_send_json_success( PCI_SLS_Catalog::page_catalog( 3 ) );
 	}
 
 	public function handle_catalog_reset() {
