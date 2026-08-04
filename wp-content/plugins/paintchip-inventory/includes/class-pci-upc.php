@@ -24,6 +24,36 @@ class PCI_UPC {
 	}
 
 	/**
+	 * Check the token against a UPC that is certainly in their database.
+	 *
+	 * @return array{ok:bool,message:string}
+	 */
+	public static function test_token() {
+		if ( ! self::is_configured() ) {
+			return array( 'ok' => false, 'message' => __( 'No token is set.', 'pci' ) );
+		}
+
+		// Coca-Cola 12oz can — about as well-known as a barcode gets.
+		delete_transient( 'pci_upc_' . md5( '049000006344' ) );
+		$res = self::lookup( '049000006344' );
+
+		if ( is_wp_error( $res ) ) {
+			return array(
+				'ok'      => false,
+				'message' => $res->get_error_message() . ' '
+					. ( 'pci_upc_auth' === $res->get_error_code()
+						? __( 'That points at the token rather than the data.', 'pci' )
+						: __( 'The token appears to work, but this well-known barcode was not found — which is odd.', 'pci' ) ),
+			);
+		}
+
+		return array(
+			'ok'      => true,
+			'message' => sprintf( __( 'Token works: "%s" returned.', 'pci' ), $res['title'] ),
+		);
+	}
+
+	/**
 	 * @param string $upc
 	 * @return array|WP_Error Normalised: title, brand, images[]
 	 */
@@ -55,11 +85,38 @@ class PCI_UPC {
 
 		$json = json_decode( wp_remote_retrieve_body( $res ), true );
 
-		if ( empty( $json['item_response']['code'] ) || 200 !== (int) $json['item_response']['code'] ) {
+		$code = isset( $json['item_response']['code'] ) ? (int) $json['item_response']['code'] : 0;
+		$note = isset( $json['item_response']['message'] ) ? (string) $json['item_response']['message'] : '';
+
+		if ( 200 !== $code ) {
+			// Distinguish a genuine miss from a rejected key. Reporting an
+			// auth failure as "no record" hides an expired token behind what
+			// looks like ordinary absence, and every lookup then fails
+			// silently.
+			$auth = in_array( $code, array( 101, 102, 103, 104, 105, 401, 403 ), true )
+				|| preg_match( '/token|auth|key|denied|limit|quota/i', $note );
+
+			if ( $auth ) {
+				return new WP_Error(
+					'pci_upc_auth',
+					sprintf(
+						__( 'Barcode Spider rejected the request (code %1$d%2$s). The token is probably expired or out of quota.', 'pci' ),
+						$code,
+						$note ? ': ' . $note : ''
+					)
+				);
+			}
+
 			set_transient( $key, 'miss', self::CACHE_TTL );
+
 			return new WP_Error(
 				'pci_upc_miss',
-				sprintf( __( 'Barcode Spider has no record for UPC %s.', 'pci' ), $upc )
+				sprintf(
+					__( 'Barcode Spider has no record for UPC %1$s (code %2$d%3$s).', 'pci' ),
+					$upc,
+					$code,
+					$note ? ': ' . $note : ''
+				)
 			);
 		}
 

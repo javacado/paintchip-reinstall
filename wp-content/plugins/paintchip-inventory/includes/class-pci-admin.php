@@ -2318,6 +2318,11 @@ class PCI_Admin {
 					<td>
 						<input type="text" name="upc_token" value="<?php echo esc_attr( PCI_UPC::token() ); ?>" class="regular-text" autocomplete="off">
 						<p class="description"><?php esc_html_e( 'Used only to find a product image when the supplier has none or theirs is too small. Leave blank to skip the UPC fallback.', 'pci' ); ?></p>
+						<?php $t = get_transient( 'pci_upc_test' ); delete_transient( 'pci_upc_test' ); ?>
+						<?php if ( is_array( $t ) ) : ?>
+							<p style="color:<?php echo $t['ok'] ? '#00a32a' : '#d63638'; ?>;"><?php echo esc_html( $t['message'] ); ?></p>
+						<?php endif; ?>
+						<button class="button button-small" name="test_upc" value="1"><?php esc_html_e( 'Test this token', 'pci' ); ?></button>
 					</td>
 				</tr>
 				<tr>
@@ -2448,6 +2453,10 @@ class PCI_Admin {
 		update_option( PCI_Run::OPT_WRITE_PRICES, ! empty( $_POST['write_prices'] ) ? 1 : 0 );
 		update_option( PCI_Run::OPT_MAX_CHANGE_PCT, max( 1, min( 100, (int) $_POST['max_change_pct'] ) ) );
 		update_option( PCI_UPC::OPT_TOKEN, isset( $_POST['upc_token'] ) ? sanitize_text_field( wp_unslash( $_POST['upc_token'] ) ) : '' );
+
+		if ( ! empty( $_POST['test_upc'] ) ) {
+			set_transient( 'pci_upc_test', PCI_UPC::test_token(), 120 );
+		}
 		update_option( PCI_Sourcing::OPT_MIN_IMG_WIDTH, isset( $_POST['min_img'] ) ? max( 50, (int) $_POST['min_img'] ) : 300 );
 		update_option( PCI_Sourcing::OPT_BATCH_SIZE, isset( $_POST['batch'] ) ? max( 1, min( 50, (int) $_POST['batch'] ) ) : 10 );
 
