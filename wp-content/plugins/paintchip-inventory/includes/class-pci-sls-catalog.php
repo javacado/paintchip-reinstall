@@ -318,15 +318,98 @@ class PCI_SLS_Catalog {
 		);
 	}
 
+	/**
+	 * The outer frameset URL for a search.
+	 *
+	 * Loading this first appears to be what establishes the search in session
+	 * state; the inner frame then renders the result. Fetching the frame alone
+	 * returns a default listing, which reads as "no match" and is why every
+	 * lookup failed.
+	 */
+	public static function search_frame_url( $sku ) {
+		return self::BASE . 'defaultframe.asp?' . http_build_query( array(
+			'level1'  => '',
+			'level2'  => '',
+			'level3'  => '',
+			'level4'  => '',
+			'level5'  => '',
+			'skuonly' => '',
+			'txtfind' => trim( (string) $sku ),
+			'ltlonly' => '',
+		) );
+	}
+
+	/**
+	 * Fetch a search result, priming the frameset first.
+	 *
+	 * @return string|WP_Error
+	 */
+	public static function fetch_search( $sku ) {
+		$scraper = new PCI_Scraper_SLS();
+		$portal  = PCI_Scraper_SLS::portal_enabled();
+		$http    = new PCI_Http( 'SS' );
+
+		// Step 1: the outer page, to register the search.
+		$outer = self::search_frame_url( $sku );
+		if ( $portal ) {
+			$scraper->portal_get( $outer );
+		} else {
+			$http->get( $outer );
+		}
+
+		usleep( 250000 );
+
+		// Step 2: the frame that actually holds the table.
+		$inner = self::search_url( $sku );
+
+		return $portal ? $scraper->portal_get( $inner ) : $http->get( $inner );
+	}
+
+	/**
+	 * One search, with everything needed to see what happened.
+	 *
+	 * @return array
+	 */
+	public static function debug_search( $sku ) {
+		$out = array(
+			'sku'        => $sku,
+			'frame_url'  => self::search_frame_url( $sku ),
+			'search_url' => self::search_url( $sku ),
+			'portal'     => PCI_Scraper_SLS::portal_enabled(),
+		);
+
+		$html = self::fetch_search( $sku );
+
+		if ( is_wp_error( $html ) ) {
+			$out['error'] = $html->get_error_message();
+			return $out;
+		}
+
+		$parsed = self::parse_listing( $html );
+
+		$skus = array();
+		foreach ( $parsed['items'] as $i ) {
+			$skus[] = $i['sku'];
+		}
+
+		$out['bytes']       = strlen( $html );
+		$out['rows']        = count( $parsed['items'] );
+		$out['category']    = implode( ' > ', $parsed['category'] );
+		$out['first_skus']  = array_slice( $skus, 0, 20 );
+		$out['contains']    = ( false !== stripos( $html, $sku ) );
+		$out['logged_out']  = PCI_Scraper_SLS::looks_logged_out( $html );
+		$out['excerpt']     = PCI_Scraper_SLS::excerpt( $html, 1200 );
+
+		return $out;
+	}
+
 	public static function find_sku( $sku ) {
 		$sku = trim( (string) $sku );
 		if ( '' === $sku ) {
 			return array( 'ok' => false, 'message' => __( 'No SKU given.', 'pci' ), 'item' => null );
 		}
 
-		$url     = self::search_url( $sku );
-		$scraper = new PCI_Scraper_SLS();
-		$html    = PCI_Scraper_SLS::portal_enabled() ? $scraper->portal_get( $url ) : ( new PCI_Http( 'SS' ) )->get( $url );
+		$html = self::fetch_search( $sku );
 
 		if ( is_wp_error( $html ) ) {
 			// A transport failure is not the same as "not stocked", so it is

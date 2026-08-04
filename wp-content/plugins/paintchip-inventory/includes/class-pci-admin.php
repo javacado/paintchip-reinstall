@@ -1316,6 +1316,41 @@ class PCI_Admin {
 			<span class="pci-muted"><?php esc_html_e( 'Slower is safer. The run halts by itself if SLS stops responding three times running.', 'pci' ); ?></span>
 		</form>
 
+		<?php $dbg = get_transient( 'pci_search_debug' ); delete_transient( 'pci_search_debug' ); ?>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:1em 0;padding:12px;background:#fff;border:1px solid #dcdcde;max-width:900px;">
+			<?php wp_nonce_field( 'pci_catalog' ); ?>
+			<input type="hidden" name="action" value="pci_catalog_reset">
+			<strong><?php esc_html_e( 'Test a single lookup', 'pci' ); ?></strong>
+			<p class="pci-muted"><?php esc_html_e( 'Runs one search and shows exactly what SLS sent back — the fastest way to tell a genuine miss from a broken request.', 'pci' ); ?></p>
+			<p>
+				<input type="text" name="testsku" class="regular-text code" value="<?php echo esc_attr( $dbg['sku'] ?? 'BS588106' ); ?>">
+				<button class="button" name="mode" value="testsearch"><?php esc_html_e( 'Run it', 'pci' ); ?></button>
+			</p>
+		</form>
+
+		<?php if ( is_array( $dbg ) ) : ?>
+			<div class="<?php echo empty( $dbg['error'] ) && ! empty( $dbg['contains'] ) ? 'pci-note' : 'pci-danger'; ?>" style="max-width:900px;">
+				<table class="widefat" style="background:transparent;">
+					<tbody>
+						<tr><th style="width:190px;"><?php esc_html_e( 'Frame primed', 'pci' ); ?></th><td><code style="font-size:11px;"><?php echo esc_html( $dbg['frame_url'] ); ?></code></td></tr>
+						<tr><th><?php esc_html_e( 'Then fetched', 'pci' ); ?></th><td><code style="font-size:11px;"><?php echo esc_html( $dbg['search_url'] ); ?></code></td></tr>
+						<tr><th><?php esc_html_e( 'Using portal', 'pci' ); ?></th><td><?php echo ! empty( $dbg['portal'] ) ? 'yes' : 'no'; ?></td></tr>
+						<?php if ( ! empty( $dbg['error'] ) ) : ?>
+							<tr><th><?php esc_html_e( 'Error', 'pci' ); ?></th><td style="color:#d63638;"><?php echo esc_html( $dbg['error'] ); ?></td></tr>
+						<?php else : ?>
+							<tr><th><?php esc_html_e( 'Response', 'pci' ); ?></th><td><?php echo (int) $dbg['bytes']; ?> bytes, <?php echo (int) $dbg['rows']; ?> product rows</td></tr>
+							<tr><th><?php esc_html_e( 'Page mentions the SKU', 'pci' ); ?></th>
+								<td><strong style="color:<?php echo ! empty( $dbg['contains'] ) ? '#00a32a' : '#d63638'; ?>;"><?php echo ! empty( $dbg['contains'] ) ? 'yes' : 'no'; ?></strong></td></tr>
+							<tr><th><?php esc_html_e( 'Looks logged out', 'pci' ); ?></th><td><?php echo ! empty( $dbg['logged_out'] ) ? 'yes — session problem' : 'no'; ?></td></tr>
+							<tr><th><?php esc_html_e( 'Category shown', 'pci' ); ?></th><td><?php echo esc_html( $dbg['category'] ?: '—' ); ?></td></tr>
+							<tr><th><?php esc_html_e( 'First SKUs returned', 'pci' ); ?></th><td><code><?php echo esc_html( implode( ', ', $dbg['first_skus'] ) ); ?></code></td></tr>
+							<tr><th><?php esc_html_e( 'Page text', 'pci' ); ?></th><td><pre style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:0;font-size:11px;"><?php echo esc_html( $dbg['excerpt'] ); ?></pre></td></tr>
+						<?php endif; ?>
+					</tbody>
+				</table>
+			</div>
+		<?php endif; ?>
+
 		<h2 class="pci-section"><?php esc_html_e( 'Option 2 — index the whole catalog', 'pci' ); ?></h2>
 		<p><?php esc_html_e( 'Walks the category tree and indexes everything. Slower, but it builds a complete picture that future reports can be matched against without any further requests.', 'pci' ); ?></p>
 		<p>
@@ -1627,6 +1662,13 @@ class PCI_Admin {
 		if ( 'save_delay' === $mode ) {
 			update_option( PCI_SLS_Catalog::OPT_DELAY_MS, max( 250, min( 10000, (int) $_POST['delay'] ) ) );
 			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog', 'pci_msg' => __( 'Pause saved.', 'pci' ) ), admin_url( 'admin.php' ) ) );
+			exit;
+		}
+
+		if ( 'testsearch' === $mode ) {
+			$sku = isset( $_POST['testsku'] ) ? sanitize_text_field( wp_unslash( $_POST['testsku'] ) ) : '';
+			set_transient( 'pci_search_debug', PCI_SLS_Catalog::debug_search( $sku ), 120 );
+			wp_safe_redirect( add_query_arg( array( 'page' => self::SLUG . '-catalog' ), admin_url( 'admin.php' ) ) );
 			exit;
 		}
 
