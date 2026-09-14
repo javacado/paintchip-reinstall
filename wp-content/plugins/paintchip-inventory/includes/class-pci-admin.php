@@ -30,6 +30,7 @@ class PCI_Admin {
 		add_action( 'admin_post_pci_export', array( $this, 'handle_export' ) );
 		add_action( 'admin_post_pci_export_dropped', array( $this, 'handle_export_dropped' ) );
 		add_action( 'wp_ajax_pci_hide_dropped', array( $this, 'ajax_hide_dropped' ) );
+		add_action( 'admin_post_pci_export_unmatched', array( $this, 'handle_export_unmatched' ) );
 		add_action( 'wp_ajax_pci_scrape', array( $this, 'ajax_scrape' ) );
 		add_action( 'wp_ajax_pci_fetch_batch', array( $this, 'ajax_fetch_batch' ) );
 		add_action( 'wp_ajax_pci_apply_chunk', array( $this, 'ajax_apply_chunk' ) );
@@ -692,6 +693,74 @@ class PCI_Admin {
 		<?php
 	}
 
+	public function handle_export_unmatched() {
+		$run_id = isset( $_GET['run'] ) ? (int) $_GET['run'] : 0;
+		check_admin_referer( 'pci_export_unmatched_' . $run_id );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to export.', 'pci' ) );
+		}
+
+		$rows = PCI_Sourcing::unmatched( $run_id );
+		$run  = PCI_Run::get( $run_id );
+
+		nocache_headers();
+		header( 'Content-Type: text/csv; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename=unmatched-at-sls-' . gmdate( 'Y-m-d' ) . '.csv' );
+
+		$out = fopen( 'php://output', 'w' );
+
+		fputcsv( $out, array( 'Items we could not match to the SLS catalog' ) );
+		fputcsv( $out, array( 'From the inventory report dated ' . ( $run ? $run->report_date : '' ) . ', checked ' . gmdate( 'j M Y' ) ) );
+		fputcsv( $out, array() );
+		fputcsv( $out, array( 'These items are in your POS with stock on hand, but they are not on the website yet and we' ) );
+		fputcsv( $out, array( 'cannot find them in the SLS catalog to get a description, photo and barcode.' ) );
+		fputcsv( $out, array() );
+		fputcsv( $out, array( 'That usually means one of three things:' ) );
+		fputcsv( $out, array( '  1. SLS no longer carries the item' ) );
+		fputcsv( $out, array( '  2. The code in the POS is wrong, or has been shortened at some point' ) );
+		fputcsv( $out, array( '  3. SLS has renumbered it and the POS still has the old code' ) );
+		fputcsv( $out, array() );
+		fputcsv( $out, array( 'Please tell us in the Answer column what each one should be:' ) );
+		fputcsv( $out, array( '  CORRECT CODE IS ___  = give us the right SLS code and we will add it' ) );
+		fputcsv( $out, array( '  DISCONTINUED        = no longer carried, ignore it' ) );
+		fputcsv( $out, array( '  NOT FROM SLS        = comes from a different supplier' ) );
+		fputcsv( $out, array( '  UNSURE              = needs someone to look' ) );
+		fputcsv( $out, array() );
+
+		fputcsv( $out, array(
+			'Answer',
+			'Notes',
+			'Code in your POS',
+			'Description in your POS',
+			'Supplier item number',
+			'Department',
+			'Quantity on hand',
+			'Your selling price',
+			'Your cost',
+			'Why we could not match it',
+			'Check it yourself here',
+		) );
+
+		foreach ( $rows as $r ) {
+			fputcsv( $out, array(
+				'',
+				'',
+				$r['sku'],
+				$r['description'],
+				$r['item_id'],
+				$r['dept'],
+				$r['qty'],
+				null === $r['price'] ? '' : $r['price'],
+				null === $r['cost'] ? '' : $r['cost'],
+				PCI_Sourcing::explain_failure( $r['reason'] ),
+				$r['search_url'] ? $r['search_url'] : $r['url'],
+			) );
+		}
+
+		fclose( $out );
+		exit;
+	}
+
 	public function ajax_hide_dropped() {
 		check_ajax_referer( 'pci_hide_dropped' );
 		if ( ! current_user_can( PCI_CAP ) ) {
@@ -1210,6 +1279,38 @@ class PCI_Admin {
 					<span class="pci-muted"><?php esc_html_e( 'Drafts are not visible on the site until you publish them.', 'pci' ); ?></span>
 				</p>
 			</form>
+		<?php endif; ?>
+
+		<?php
+		$unmatched = PCI_Sourcing::unmatched_count( $run_id );
+		$noimg     = PCI_Sourcing::no_image_count( $run_id );
+		if ( $unmatched || $noimg ) :
+			?>
+			<div class="pci-section">
+				<h2><?php esc_html_e( 'What will not be created', 'pci' ); ?></h2>
+				<table class="pci-ledger">
+					<tbody>
+						<tr>
+							<td><?php esc_html_e( 'Could not be matched at SLS', 'pci' ); ?></td>
+							<td class="num"><?php echo (int) $unmatched; ?></td>
+							<td class="pci-muted"><?php esc_html_e( 'No product is created for these. They are the red cards above.', 'pci' ); ?></td>
+						</tr>
+						<tr>
+							<td><?php esc_html_e( 'Matched, but with no usable image', 'pci' ); ?></td>
+							<td class="num"><?php echo (int) $noimg; ?></td>
+							<td class="pci-muted"><?php esc_html_e( 'These WILL be created — just without a picture.', 'pci' ); ?></td>
+						</tr>
+					</tbody>
+				</table>
+				<?php if ( $unmatched ) : ?>
+					<p>
+						<a class="button button-primary" href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'action' => 'pci_export_unmatched', 'run' => $run_id ), admin_url( 'admin-post.php' ) ), 'pci_export_unmatched_' . $run_id ) ); ?>">
+							<?php printf( esc_html__( 'Download the %d unmatched for the client (CSV)', 'pci' ), (int) $unmatched ); ?>
+						</a>
+						<span class="pci-muted"><?php esc_html_e( 'Everything we know about each one, with a plain explanation and a column for their answer.', 'pci' ); ?></span>
+					</p>
+				<?php endif; ?>
+			</div>
 		<?php endif; ?>
 
 		<?php if ( (int) $c['drafts'] > 0 ) : ?>

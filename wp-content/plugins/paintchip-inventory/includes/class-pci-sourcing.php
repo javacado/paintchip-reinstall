@@ -583,6 +583,102 @@ class PCI_Sourcing {
 		return (int) $product_id;
 	}
 
+	/**
+	 * Rows that could not be matched to anything in the supplier's catalog.
+	 *
+	 * These are worth reporting back to the client rather than quietly
+	 * dropping: a code that the supplier does not recognise usually means the
+	 * POS record is wrong, truncated, or refers to a line that has gone.
+	 *
+	 * @return array
+	 */
+	public static function unmatched( $run_id, $limit = 2000 ) {
+		global $wpdb;
+		$t = PCI_Schema::table( 'items' );
+
+		$rows = $wpdb->get_results( $wpdb->prepare(
+			"SELECT * FROM {$t}
+			 WHERE run_id = %d AND action = %s AND raw LIKE %s
+			 ORDER BY vend, sku LIMIT %d",
+			(int) $run_id,
+			PCI_Classifier::NEW_P,
+			'%scrape_error%',
+			(int) $limit
+		) );
+
+		$out = array();
+
+		foreach ( $rows as $r ) {
+			$raw = json_decode( (string) $r->raw, true );
+			if ( ! is_array( $raw ) || empty( $raw['scrape_error'] ) ) {
+				continue;
+			}
+
+			$out[] = array(
+				'sku'         => $r->sku,
+				'vend'        => $r->vend,
+				'item_id'     => $r->item_id,
+				'description' => $r->description,
+				'dept'        => $r->dept,
+				'qty'         => (int) $r->file_qty,
+				'price'       => $r->file_price,
+				'cost'        => $r->file_cost,
+				'reason'      => $raw['scrape_error'],
+				'checked_at'  => isset( $raw['scraped_at'] ) ? $raw['scraped_at'] : '',
+				'url'         => isset( $raw['scrape_url'] ) ? $raw['scrape_url'] : '',
+				'search_url'  => isset( $raw['search_url'] ) ? $raw['search_url'] : '',
+			);
+		}
+
+		return $out;
+	}
+
+	/** Plain-language version of a scrape failure, for the client. */
+	public static function explain_failure( $reason ) {
+		$r = strtolower( (string) $reason );
+
+		if ( false !== strpos( $r, 'did not contain that sku' ) || false !== strpos( $r, 'no product matching' ) ) {
+			return __( 'SLS has no product under this code. It is probably discontinued, or the code in the POS is wrong or incomplete.', 'pci' );
+		}
+		if ( false !== strpos( $r, 'no category' ) ) {
+			return __( 'SLS search returned nothing for this code — most likely no longer carried.', 'pci' );
+		}
+		if ( false !== strpos( $r, 'no adapter' ) ) {
+			return __( 'We have no way to look this supplier up yet.', 'pci' );
+		}
+		if ( false !== strpos( $r, 'timed out' ) || false !== strpos( $r, 'could not' ) ) {
+			return __( 'Could not reach SLS when we checked. Worth trying again.', 'pci' );
+		}
+
+		return __( 'Could not be matched to anything in the SLS catalog.', 'pci' );
+	}
+
+	/** How many rows are unmatched. */
+	public static function unmatched_count( $run_id ) {
+		global $wpdb;
+		$t = PCI_Schema::table( 'items' );
+		return (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND action = %s AND raw LIKE %s",
+			(int) $run_id,
+			PCI_Classifier::NEW_P,
+			'%scrape_error%'
+		) );
+	}
+
+	/** Fetched rows with no usable image — creatable, but they will look bare. */
+	public static function no_image_count( $run_id ) {
+		global $wpdb;
+		$t = PCI_Schema::table( 'items' );
+		return (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$t}
+			 WHERE run_id = %d AND action = %s AND raw LIKE %s AND raw LIKE %s",
+			(int) $run_id,
+			PCI_Classifier::NEW_P,
+			'%"scraped":{%',
+			'%"image_url":""%'
+		) );
+	}
+
 	// ---------------------------------------------------------------- review
 
 	public static function drafts( $run_id, $limit = 100, $offset = 0 ) {
