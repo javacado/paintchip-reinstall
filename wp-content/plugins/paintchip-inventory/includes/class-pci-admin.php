@@ -29,6 +29,7 @@ class PCI_Admin {
 		add_action( 'admin_post_pci_catalog_reset', array( $this, 'handle_catalog_reset' ) );
 		add_action( 'admin_post_pci_export', array( $this, 'handle_export' ) );
 		add_action( 'admin_post_pci_export_dropped', array( $this, 'handle_export_dropped' ) );
+		add_action( 'wp_ajax_pci_hide_dropped', array( $this, 'ajax_hide_dropped' ) );
 		add_action( 'wp_ajax_pci_scrape', array( $this, 'ajax_scrape' ) );
 		add_action( 'wp_ajax_pci_fetch_batch', array( $this, 'ajax_fetch_batch' ) );
 		add_action( 'wp_ajax_pci_apply_chunk', array( $this, 'ajax_apply_chunk' ) );
@@ -581,11 +582,63 @@ class PCI_Admin {
 					?>
 				</p>
 				<p>
-					<a class="button button-primary" href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'action' => 'pci_export_dropped', 'run' => $run_id ), admin_url( 'admin-post.php' ) ), 'pci_export_dropped_' . $run_id ) ); ?>">
+					<a class="button" href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'action' => 'pci_export_dropped', 'run' => $run_id ), admin_url( 'admin-post.php' ) ), 'pci_export_dropped_' . $run_id ) ); ?>">
 						<?php esc_html_e( 'Download the list to check (CSV)', 'pci' ); ?>
 					</a>
 					<span class="pci-muted"><?php esc_html_e( 'Opens in Excel or Sheets, with a blank column for their verdict.', 'pci' ); ?></span>
 				</p>
+			</div>
+
+			<?php $pending = PCI_Applier::dropped_pending( $run_id ); ?>
+			<div class="<?php echo $pending ? 'pci-note' : 'pci-note'; ?>" style="border-left-color:#dba617;">
+				<p><strong><?php esc_html_e( 'Hide them instead of removing them', 'pci' ); ?></strong></p>
+				<p><?php echo esc_html( $this->hide_effect_text() ); ?>
+				<?php esc_html_e( 'The product, its images, its categories and its history all stay. Nothing is deleted, and the batch rollback reverses this along with everything else.', 'pci' ); ?></p>
+				<?php if ( $pending ) : ?>
+					<p>
+						<button class="button button-primary" id="pci-hide-dropped" data-run="<?php echo (int) $run_id; ?>">
+							<?php printf( esc_html__( 'Hide all %d from the storefront', 'pci' ), (int) $pending ); ?>
+						</button>
+						<span id="pci-hide-status" class="pci-muted"></span>
+					</p>
+					<script>
+					(function () {
+						var btn = document.getElementById('pci-hide-dropped');
+						if (!btn) return;
+						var nonce = <?php echo wp_json_encode( wp_create_nonce( 'pci_hide_dropped' ) ); ?>;
+						var status = document.getElementById('pci-hide-status');
+
+						function step(runId) {
+							var body = new FormData();
+							body.append('action', 'pci_hide_dropped');
+							body.append('run', runId);
+							body.append('_ajax_nonce', nonce);
+
+							return fetch(ajaxurl, { method: 'POST', body: body, credentials: 'same-origin' })
+								.then(function (r) { return r.json(); })
+								.then(function (res) {
+									if (!res.success) { status.textContent = res.data || 'Failed'; btn.disabled = false; return; }
+									var d = res.data;
+									status.textContent = d.remaining + ' still to hide…';
+									if (d.remaining > 0) { return step(runId); }
+									status.textContent = 'Done. Reloading…';
+									setTimeout(function () { location.reload(); }, 800);
+								})
+								.catch(function () { status.textContent = 'Request failed — press again to continue.'; btn.disabled = false; });
+						}
+
+						btn.addEventListener('click', function (e) {
+							e.preventDefault();
+							if (!confirm(<?php echo wp_json_encode( __( 'Hide these products from the storefront? They are not deleted, and rolling back this batch restores them.', 'pci' ) ); ?>)) return;
+							btn.disabled = true;
+							status.textContent = 'Hiding…';
+							step(this.dataset.run);
+						});
+					})();
+					</script>
+				<?php else : ?>
+					<p class="pci-muted"><?php esc_html_e( 'All of them are already hidden.', 'pci' ); ?></p>
+				<?php endif; ?>
 			</div>
 
 			<details class="pci-list" open>
@@ -627,6 +680,19 @@ class PCI_Admin {
 			</details>
 		</div>
 		<?php
+	}
+
+	public function ajax_hide_dropped() {
+		check_ajax_referer( 'pci_hide_dropped' );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_send_json_error( __( 'You do not have permission to do that.', 'pci' ) );
+		}
+
+		@set_time_limit( 120 );
+
+		$run_id = isset( $_POST['run'] ) ? (int) $_POST['run'] : 0;
+
+		wp_send_json_success( PCI_Applier::hide_dropped( $run_id, 40 ) );
 	}
 
 	public function handle_export_dropped() {

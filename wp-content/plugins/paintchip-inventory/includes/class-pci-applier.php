@@ -82,9 +82,12 @@ class PCI_Applier {
 			array_merge( array( (int) $run_id ), $actions )
 		) );
 
+		// Scoped to the batch's own actions: hiding dropped products adds
+		// journal rows too, and counting those here would push the progress
+		// bar past 100%.
 		$done = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$j} WHERE run_id = %d",
-			(int) $run_id
+			"SELECT COUNT(*) FROM {$j} WHERE run_id = %d AND action IN ({$in})",
+			array_merge( array( (int) $run_id ), $actions )
 		) );
 
 		return array(
@@ -298,6 +301,125 @@ class PCI_Applier {
 		$product->save();
 
 		return $after;
+	}
+
+	const ACTION_DROPPED = 'dropped_hide';
+
+	/**
+	 * Hide products that vanished from the report.
+	 *
+	 * Deliberately separate from the batch's own actions. Absence in an export
+	 * is not a statement that a line was dropped, so this only ever runs when
+	 * someone asks for it — and it hides rather than deletes, so the product,
+	 * its images and its history survive.
+	 *
+	 * Journalled against the same run, so the batch rollback undoes this too.
+	 *
+	 * @return array{hidden:int,skipped:int,remaining:int,errors:array}
+	 */
+	public static function hide_dropped( $run_id, $limit = 50 ) {
+		global $wpdb;
+
+		$journal = PCI_Schema::table( 'journal' );
+		$rows    = PCI_Signals::dropped_items( $run_id, 0, 5000 );
+
+		// Already handled in a previous chunk?
+		$done = $wpdb->get_col( $wpdb->prepare(
+			"SELECT product_id FROM {$journal} WHERE run_id = %d AND action = %s",
+			(int) $run_id,
+			self::ACTION_DROPPED
+		) );
+		$done = array_map( 'intval', $done );
+
+		$todo = array();
+		foreach ( $rows as $r ) {
+			if ( $r->product_id && ! in_array( (int) $r->product_id, $done, true ) ) {
+				$todo[] = $r;
+			}
+		}
+
+		$remaining = count( $todo );
+		$todo      = array_slice( $todo, 0, max( 1, (int) $limit ) );
+
+		$hidden  = 0;
+		$skipped = 0;
+		$errors  = array();
+
+		foreach ( $todo as $r ) {
+			$product = wc_get_product( (int) $r->product_id );
+			if ( ! $product ) {
+				$skipped++;
+				continue;
+			}
+
+			$before = self::snapshot( $product );
+
+			try {
+				$product->set_manage_stock( true );
+				$product->set_stock_quantity( 0 );
+				$product->set_stock_status( 'outofstock' );
+
+				$mode = PCI_Run::hide_mode();
+				if ( 'exclude' === $mode ) {
+					$product->set_catalog_visibility( 'hidden' );
+				}
+
+				$product->save();
+
+				if ( 'draft' === $mode ) {
+					wp_update_post( array( 'ID' => (int) $r->product_id, 'post_status' => 'draft' ) );
+				}
+			} catch ( Exception $e ) {
+				$skipped++;
+				$errors[] = $r->sku . ': ' . $e->getMessage();
+				continue;
+			}
+
+			$wpdb->insert( $journal, array(
+				'run_id'     => (int) $run_id,
+				'product_id' => (int) $r->product_id,
+				'sku'        => $r->sku,
+				'action'     => self::ACTION_DROPPED,
+				'snapshot'   => wp_json_encode( $before ),
+				'applied'    => wp_json_encode( array( 'stock_quantity' => 0, 'stock_status' => 'outofstock', 'hide_mode' => PCI_Run::hide_mode() ) ),
+				'created_at' => current_time( 'mysql' ),
+			) );
+
+			$hidden++;
+		}
+
+		if ( function_exists( 'wc_delete_product_transients' ) ) {
+			wc_delete_product_transients();
+		}
+
+		return array(
+			'hidden'    => $hidden,
+			'skipped'   => $skipped,
+			'remaining' => max( 0, $remaining - $hidden - $skipped ),
+			'errors'    => $errors,
+		);
+	}
+
+	/** How many dropped products are still visible. */
+	public static function dropped_pending( $run_id ) {
+		global $wpdb;
+		$journal = PCI_Schema::table( 'journal' );
+
+		$rows = PCI_Signals::dropped_items( $run_id, 0, 5000 );
+		$done = array_map( 'intval', $wpdb->get_col( $wpdb->prepare(
+			"SELECT product_id FROM {$journal} WHERE run_id = %d AND action = %s",
+			(int) $run_id,
+			self::ACTION_DROPPED
+		) ) );
+
+		$n = 0;
+		foreach ( $rows as $r ) {
+			if ( $r->product_id && ! in_array( (int) $r->product_id, $done, true ) ) {
+				$n++;
+			}
+		}
+
+		return $n;
 	}
 
 	/**
