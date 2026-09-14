@@ -28,6 +28,7 @@ class PCI_Admin {
 		add_action( 'wp_ajax_pci_page_catalog', array( $this, 'ajax_page_catalog' ) );
 		add_action( 'admin_post_pci_catalog_reset', array( $this, 'handle_catalog_reset' ) );
 		add_action( 'admin_post_pci_export', array( $this, 'handle_export' ) );
+		add_action( 'admin_post_pci_export_dropped', array( $this, 'handle_export_dropped' ) );
 		add_action( 'wp_ajax_pci_scrape', array( $this, 'ajax_scrape' ) );
 		add_action( 'wp_ajax_pci_fetch_batch', array( $this, 'ajax_fetch_batch' ) );
 		add_action( 'wp_ajax_pci_apply_chunk', array( $this, 'ajax_apply_chunk' ) );
@@ -322,6 +323,7 @@ class PCI_Admin {
 		<?php
 		$this->fingerprint_section( $run_id );
 		$this->removals_section( $run_id, $counts );
+		$this->dropped_section( $run_id );
 		$this->flags_section( $run_id, $counts );
 		$this->updates_section( $run_id, $counts );
 		$this->new_section( $run_id, $counts );
@@ -535,6 +537,156 @@ class PCI_Admin {
 			<?php endif; ?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Products that vanished from the report since last time.
+	 *
+	 * Never acted on: a record can leave the export because the line was
+	 * discontinued, because it was renumbered, or because the report was run
+	 * differently. This is a review queue, and the column that decides each
+	 * case is whether the product is still live on the site.
+	 */
+	private function dropped_section( $run_id ) {
+		$prev = PCI_Signals::previous_run_id( $run_id );
+		if ( ! $prev ) {
+			return;
+		}
+
+		$rows = PCI_Signals::dropped_items( $run_id, $prev, 1000 );
+		if ( empty( $rows ) ) {
+			return;
+		}
+
+		$live = 0;
+		foreach ( $rows as $r ) {
+			if ( $r->product_id ) {
+				$live++;
+			}
+		}
+		?>
+		<div class="pci-section">
+			<h2><?php printf( esc_html__( 'Gone from the report since batch #%d (%d)', 'pci' ), (int) $prev, count( $rows ) ); ?></h2>
+
+			<div class="pci-note">
+				<p><strong><?php esc_html_e( 'Nothing here has been changed or will be.', 'pci' ); ?></strong>
+				<?php esc_html_e( 'These SKUs were in the previous report and are absent from this one. Absence is not a statement — a record can disappear because the line was dropped, because it was renumbered, or because the report was run with different settings. Someone who knows the shop has to say which.', 'pci' ); ?></p>
+				<p>
+					<?php
+					printf(
+						esc_html__( '%1$d of these are still live on the website. The other %2$d are not, so they need no decision.', 'pci' ),
+						$live,
+						count( $rows ) - $live
+					);
+					?>
+				</p>
+				<p>
+					<a class="button button-primary" href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'action' => 'pci_export_dropped', 'run' => $run_id ), admin_url( 'admin-post.php' ) ), 'pci_export_dropped_' . $run_id ) ); ?>">
+						<?php esc_html_e( 'Download the list to check (CSV)', 'pci' ); ?>
+					</a>
+					<span class="pci-muted"><?php esc_html_e( 'Opens in Excel or Sheets, with a blank column for their verdict.', 'pci' ); ?></span>
+				</p>
+			</div>
+
+			<details class="pci-list" open>
+				<summary><?php printf( esc_html__( 'The %d still live on the site', 'pci' ), $live ); ?></summary>
+				<div class="pci-scroll">
+					<table class="widefat striped">
+						<thead><tr>
+							<th><?php esc_html_e( 'Product on the site', 'pci' ); ?></th>
+							<th><?php esc_html_e( 'SKU', 'pci' ); ?></th>
+							<th><?php esc_html_e( 'Supplier', 'pci' ); ?></th>
+							<th><?php esc_html_e( 'Last seen as', 'pci' ); ?></th>
+							<th><?php esc_html_e( 'Last qty', 'pci' ); ?></th>
+							<th><?php esc_html_e( 'Stock now', 'pci' ); ?></th>
+							<th></th>
+						</tr></thead>
+						<tbody>
+						<?php foreach ( $rows as $r ) : if ( ! $r->product_id ) { continue; } ?>
+							<tr>
+								<td><strong><?php echo esc_html( $r->product_title ); ?></strong>
+									<?php if ( 'publish' !== $r->product_status ) : ?>
+										<span class="pci-muted"> (<?php echo esc_html( $r->product_status ); ?>)</span>
+									<?php endif; ?>
+								</td>
+								<td><code><?php echo esc_html( $r->sku ); ?></code></td>
+								<td><?php echo esc_html( $r->vend ); ?></td>
+								<td class="pci-muted"><?php echo esc_html( $r->description ); ?></td>
+								<td><?php echo (int) $r->last_qty; ?></td>
+								<td><?php echo esc_html( null === $r->stock ? '—' : $r->stock ); ?>
+									<?php if ( 'instock' !== $r->stock_status ) : ?>
+										<span class="pci-muted"><?php echo esc_html( $r->stock_status ); ?></span>
+									<?php endif; ?>
+								</td>
+								<td><a href="<?php echo esc_url( get_edit_post_link( $r->product_id ) ); ?>" target="_blank"><?php esc_html_e( 'Open', 'pci' ); ?></a></td>
+							</tr>
+						<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+			</details>
+		</div>
+		<?php
+	}
+
+	public function handle_export_dropped() {
+		$run_id = isset( $_GET['run'] ) ? (int) $_GET['run'] : 0;
+		check_admin_referer( 'pci_export_dropped_' . $run_id );
+		if ( ! current_user_can( PCI_CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to export.', 'pci' ) );
+		}
+
+		$prev = PCI_Signals::previous_run_id( $run_id );
+		$rows = PCI_Signals::dropped_items( $run_id, $prev, 5000 );
+
+		nocache_headers();
+		header( 'Content-Type: text/csv; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename=gone-from-report-batch-' . $run_id . '-' . gmdate( 'Y-m-d' ) . '.csv' );
+
+		$out = fopen( 'php://output', 'w' );
+
+		// A leading note, so whoever opens this knows what they are looking at.
+		fputcsv( $out, array( 'These SKUs were in the previous inventory report and are missing from the newest one.' ) );
+		fputcsv( $out, array( 'Nothing has been changed on the website. Please mark each one in the Verdict column:' ) );
+		fputcsv( $out, array( 'DISCONTINUED = no longer carried, remove it from the site' ) );
+		fputcsv( $out, array( 'KEEP = still carried, the report is wrong or it was renumbered' ) );
+		fputcsv( $out, array( 'UNSURE = needs someone to look' ) );
+		fputcsv( $out, array() );
+
+		fputcsv( $out, array(
+			'Verdict (DISCONTINUED / KEEP / UNSURE)',
+			'Notes',
+			'Product name on the website',
+			'SKU',
+			'Supplier',
+			'Description in the report',
+			'Supplier item number',
+			'Quantity last time',
+			'Price last time',
+			'Still on the website?',
+			'Stock showing now',
+			'Website link',
+		) );
+
+		foreach ( $rows as $r ) {
+			fputcsv( $out, array(
+				'',
+				'',
+				$r->product_id ? $r->product_title : '(not on the website)',
+				$r->sku,
+				$r->vend,
+				$r->description,
+				$r->item_id,
+				(int) $r->last_qty,
+				null === $r->last_price ? '' : $r->last_price,
+				$r->product_id ? 'YES' : 'no',
+				$r->product_id ? ( null === $r->stock ? 'not tracked' : $r->stock ) : '',
+				$r->product_id ? get_permalink( $r->product_id ) : '',
+			) );
+		}
+
+		fclose( $out );
+		exit;
 	}
 
 	private function flags_section( $run_id, $counts ) {

@@ -256,6 +256,82 @@ class PCI_Signals {
 		return array_map( 'intval', $row );
 	}
 
+	/**
+	 * SKUs present in the previous run but missing from this one.
+	 *
+	 * Absence is not a statement. A record can leave the export because the
+	 * line was discontinued, because it was renumbered, or because the client
+	 * ran the report with different settings. So these are never acted on
+	 * automatically — they are listed for a person to judge, with whether the
+	 * product is still live on the site being the detail that decides it.
+	 *
+	 * @return array
+	 */
+	public static function dropped_items( $run_id, $prev_run_id = 0, $limit = 1000 ) {
+		global $wpdb;
+
+		if ( ! $prev_run_id ) {
+			$prev_run_id = self::previous_run_id( $run_id );
+		}
+		if ( ! $prev_run_id ) {
+			return array();
+		}
+
+		$t  = PCI_Schema::table( 'items' );
+		$pm = $wpdb->postmeta;
+		$po = $wpdb->posts;
+
+		return $wpdb->get_results( $wpdb->prepare(
+			"SELECT
+				prev.sku,
+				prev.vend,
+				prev.description,
+				prev.item_id,
+				prev.file_qty   AS last_qty,
+				prev.file_price AS last_price,
+				prev.action     AS last_action,
+				p.ID            AS product_id,
+				p.post_title    AS product_title,
+				p.post_status   AS product_status,
+				st.meta_value   AS stock,
+				ss.meta_value   AS stock_status
+			 FROM {$t} prev
+			 LEFT JOIN {$t} cur
+			   ON cur.run_id = %d AND cur.sku = prev.sku
+			 LEFT JOIN {$pm} sku
+			   ON sku.meta_key = '_sku' AND sku.meta_value = prev.sku
+			 LEFT JOIN {$po} p
+			   ON p.ID = sku.post_id AND p.post_type = 'product' AND p.post_status <> 'trash'
+			 LEFT JOIN {$pm} st ON st.post_id = p.ID AND st.meta_key = '_stock'
+			 LEFT JOIN {$pm} ss ON ss.post_id = p.ID AND ss.meta_key = '_stock_status'
+			 WHERE prev.run_id = %d
+			   AND prev.sku <> ''
+			   AND cur.id IS NULL
+			 GROUP BY prev.sku
+			 ORDER BY (p.ID IS NULL), prev.vend, prev.sku
+			 LIMIT %d",
+			(int) $run_id,
+			(int) $prev_run_id,
+			(int) $limit
+		) );
+	}
+
+	/** @return array{total:int,live:int,gone:int} */
+	public static function dropped_summary( $run_id, $prev_run_id = 0 ) {
+		$rows = self::dropped_items( $run_id, $prev_run_id, 5000 );
+		$live = 0;
+		foreach ( $rows as $r ) {
+			if ( $r->product_id ) {
+				$live++;
+			}
+		}
+		return array(
+			'total' => count( $rows ),
+			'live'  => $live,
+			'gone'  => count( $rows ) - $live,
+		);
+	}
+
 	/** The most recent run before this one, applied or not. */
 	public static function previous_run_id( $run_id ) {
 		global $wpdb;
