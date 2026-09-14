@@ -554,8 +554,18 @@ class PCI_Admin {
 			return;
 		}
 
-		$rows = PCI_Signals::dropped_items( $run_id, $prev, 1000 );
+		$rows = PCI_Signals::dropped_items( $run_id, $prev, 2000 );
+
+		// Say why rather than silently disappearing. An empty section and a
+		// broken query look identical from the outside, which wastes an
+		// afternoon working out which one it was.
 		if ( empty( $rows ) ) {
+			?>
+			<div class="pci-section">
+				<h2><?php esc_html_e( 'Gone from the report', 'pci' ); ?></h2>
+				<p class="pci-muted"><?php echo esc_html( PCI_Signals::dropped_diagnostic( $run_id ) ); ?></p>
+			</div>
+			<?php
 			return;
 		}
 

@@ -277,46 +277,113 @@ class PCI_Signals {
 			return array();
 		}
 
-		$t  = PCI_Schema::table( 'items' );
-		$pm = $wpdb->postmeta;
-		$po = $wpdb->posts;
+		$t = PCI_Schema::table( 'items' );
 
-		return $wpdb->get_results( $wpdb->prepare(
-			"SELECT
-				prev.sku,
-				prev.vend,
-				prev.description,
-				prev.item_id,
-				prev.file_qty   AS last_qty,
-				prev.file_price AS last_price,
-				prev.action     AS last_action,
-				p.ID            AS product_id,
-				p.post_title    AS product_title,
-				p.post_status   AS product_status,
-				st.meta_value   AS stock,
-				ss.meta_value   AS stock_status
+		// Step one: which SKUs left the report. Deliberately free of GROUP BY
+		// and of any join to the product tables — an aggregate over
+		// non-grouped columns fails outright under ONLY_FULL_GROUP_BY, and a
+		// query that errors returns nothing, which looks identical to "there
+		// is nothing to show".
+		$rows = $wpdb->get_results( $wpdb->prepare(
+			"SELECT prev.sku, prev.vend, prev.description, prev.item_id,
+			        prev.file_qty AS last_qty, prev.file_price AS last_price,
+			        prev.action AS last_action
 			 FROM {$t} prev
-			 LEFT JOIN {$t} cur
-			   ON cur.run_id = %d AND cur.sku = prev.sku
-			 LEFT JOIN {$pm} sku
-			   ON sku.meta_key = '_sku' AND sku.meta_value = prev.sku
-			 LEFT JOIN {$po} p
-			   ON p.ID = sku.post_id AND p.post_type = 'product' AND p.post_status <> 'trash'
-			 LEFT JOIN {$pm} st ON st.post_id = p.ID AND st.meta_key = '_stock'
-			 LEFT JOIN {$pm} ss ON ss.post_id = p.ID AND ss.meta_key = '_stock_status'
-			 WHERE prev.run_id = %d
-			   AND prev.sku <> ''
-			   AND cur.id IS NULL
-			 GROUP BY prev.sku
-			 ORDER BY (p.ID IS NULL), prev.vend, prev.sku
+			 LEFT JOIN {$t} cur ON cur.run_id = %d AND cur.sku = prev.sku
+			 WHERE prev.run_id = %d AND prev.sku <> '' AND cur.id IS NULL
+			 ORDER BY prev.vend, prev.sku
 			 LIMIT %d",
 			(int) $run_id,
 			(int) $prev_run_id,
-			(int) $limit
+			(int) $limit * 4
 		) );
+
+		if ( empty( $rows ) ) {
+			return array();
+		}
+
+		// Dedupe in PHP rather than in SQL.
+		$byskus = array();
+		foreach ( $rows as $r ) {
+			if ( ! isset( $byskus[ $r->sku ] ) ) {
+				$byskus[ $r->sku ] = $r;
+			}
+		}
+
+		// Step two: attach the live product, if there is one.
+		$skus = array_keys( $byskus );
+		$live = array();
+
+		foreach ( array_chunk( $skus, 200 ) as $chunk ) {
+			$in  = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+			$hit = $wpdb->get_results( $wpdb->prepare(
+				"SELECT pm.meta_value AS sku, p.ID, p.post_title, p.post_status,
+				        st.meta_value AS stock, ss.meta_value AS stock_status
+				 FROM {$wpdb->postmeta} pm
+				 INNER JOIN {$wpdb->posts} p
+				   ON p.ID = pm.post_id AND p.post_type = 'product' AND p.post_status <> 'trash'
+				 LEFT JOIN {$wpdb->postmeta} st ON st.post_id = p.ID AND st.meta_key = '_stock'
+				 LEFT JOIN {$wpdb->postmeta} ss ON ss.post_id = p.ID AND ss.meta_key = '_stock_status'
+				 WHERE pm.meta_key = '_sku' AND pm.meta_value IN ({$in})",
+				$chunk
+			) );
+
+			foreach ( $hit as $h ) {
+				if ( ! isset( $live[ $h->sku ] ) ) {
+					$live[ $h->sku ] = $h;
+				}
+			}
+		}
+
+		$out = array();
+
+		foreach ( $byskus as $sku => $r ) {
+			$r->product_id     = isset( $live[ $sku ] ) ? (int) $live[ $sku ]->ID : 0;
+			$r->product_title  = isset( $live[ $sku ] ) ? $live[ $sku ]->post_title : '';
+			$r->product_status = isset( $live[ $sku ] ) ? $live[ $sku ]->post_status : '';
+			$r->stock          = isset( $live[ $sku ] ) ? $live[ $sku ]->stock : null;
+			$r->stock_status   = isset( $live[ $sku ] ) ? $live[ $sku ]->stock_status : '';
+			$out[]             = $r;
+		}
+
+		// Live products first: those are the ones needing a decision.
+		usort( $out, function ( $a, $b ) {
+			if ( ( $a->product_id > 0 ) !== ( $b->product_id > 0 ) ) {
+				return $a->product_id > 0 ? -1 : 1;
+			}
+			return strcmp( $a->vend . $a->sku, $b->vend . $b->sku );
+		} );
+
+		return array_slice( $out, 0, (int) $limit );
 	}
 
-	/** @return array{total:int,live:int,gone:int} */
+	/** Why the dropped list is empty, for the admin screen to report. */
+	public static function dropped_diagnostic( $run_id ) {
+		global $wpdb;
+		$prev = self::previous_run_id( $run_id );
+
+		if ( ! $prev ) {
+			return __( 'There is no earlier batch to compare against, so nothing can be said about what disappeared.', 'pci' );
+		}
+
+		$t = PCI_Schema::table( 'items' );
+
+		$prev_rows = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$t} WHERE run_id = %d AND sku <> ''", $prev
+		) );
+
+		if ( 0 === $prev_rows ) {
+			return sprintf( __( 'Batch #%d holds no staged rows to compare against.', 'pci' ), $prev );
+		}
+
+		if ( $wpdb->last_error ) {
+			return sprintf( __( 'The comparison query failed: %s', 'pci' ), $wpdb->last_error );
+		}
+
+		return sprintf( __( 'Nothing disappeared between batch #%1$d and batch #%2$d.', 'pci' ), $prev, $run_id );
+	}
+
+	/** @return array{total:int,live:int,gone:int} */	/** @return array{total:int,live:int,gone:int} */
 	public static function dropped_summary( $run_id, $prev_run_id = 0 ) {
 		$rows = self::dropped_items( $run_id, $prev_run_id, 5000 );
 		$live = 0;
